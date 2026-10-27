@@ -4,6 +4,13 @@
 **Blockchain Layer:** Ethereum Sepolia Testnet (Chain ID `11155111`)  
 **Frontend Interface:** Industrial Cyber-SCADA Digital Twin & Verification Station  
 
+> [!IMPORTANT]
+> **Active Branch**: `gcp` (Google Cloud Platform deployment)  
+> To switch to the AWS version of this project, run:
+> ```bash
+> git checkout aws
+> ```
+
 > **Migration Note:** This project was originally built on AWS (ap-south-1). All AWS services have been replaced with 1:1 Google Cloud equivalents in the same Mumbai region. The blockchain layer, SCADA dashboard, sensor topology, and fault logic are fully preserved.
 
 ---

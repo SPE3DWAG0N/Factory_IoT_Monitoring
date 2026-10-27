@@ -1,19 +1,20 @@
 {
   "name": "cloud-iot-blockchain-monitoring",
   "version": "1.0.0",
-  "description": "Cloud IoT Monitoring with Blockchain-Verified Service Reports (AWS ap-south-1 & Ethereum Sepolia)",
+  "description": "Cloud IoT Monitoring with Blockchain-Verified Service Reports (GCP asia-south1 & Ethereum Sepolia)",
   "scripts": {
     "dev": "npm --prefix dashboard run dev",
     "desktop": "npm --prefix dashboard run desktop",
     "app": "npm --prefix dashboard run desktop",
     "build": "npm --prefix dashboard run build",
     "preview": "npm --prefix dashboard run preview",
-    "simulator": "python simulator/device_simulator.py"
+    "simulator": "python simulator/device_simulator_gcp.py"
   },
   "keywords": [
-    "aws-iot-core",
-    "dynamodb",
-    "lambda",
+    "google-cloud-platform",
+    "cloud-pubsub",
+    "firestore",
+    "cloud-functions",
     "ethereum-sepolia",
     "scada",
     "blockchain-verification"
