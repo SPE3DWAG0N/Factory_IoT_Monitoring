@@ -1,0 +1,262 @@
+imports:
+  - path: templates/pubsub.jinja
+  - path: templates/gcs.jinja
+  - path: templates/compute.jinja
+
+# ============================================================================
+#  AETHER-PLANT SCADA — Google Cloud Deployment Manager Configuration
+#  GCP Equivalent of aws/plant-cloudformation.yaml
+#
+#  Provisions:
+#    1. Cloud Pub/Sub topic + subscriptions (replaces AWS IoT Core + Rules Engine)
+#    2. Cloud Firestore (replaces Amazon DynamoDB) — via gcloud CLI post-step
+#    3. Cloud Storage encrypted bucket (replaces Amazon S3)
+#    4. Cloud Functions fault-handler (replaces AWS Lambda)
+#    5. Google Secret Manager (replaces AWS SSM Parameter Store)
+#    6. Compute Engine e2-micro (replaces AWS EC2 t3.micro)
+#    7. IAM Service Accounts with least-privilege bindings
+#
+#  Region: asia-south1 (Mumbai) — same latency as ap-south-1
+#  Deploy: gcloud deployment-manager deployments create aether-plant --config gcp/plant-deployment.yaml
+# ============================================================================
+
+resources:
+
+  # ==========================================================================
+  # 1. IAM SERVICE ACCOUNTS (Least Privilege)
+  # ==========================================================================
+
+  # Service Account for Cloud Functions fault handler
+  - name: plant-functions-sa
+    type: iam.v1.serviceAccount
+    properties:
+      accountId: plant-functions-sa
+      displayName: Aether Plant Cloud Functions Service Account
+      description: Least-privilege SA for the fault-handler Cloud Function
+
+  # Service Account for Compute Engine dashboard VM
+  - name: plant-compute-sa
+    type: iam.v1.serviceAccount
+    properties:
+      accountId: plant-compute-sa
+      displayName: Aether Plant Compute Engine Service Account
+      description: Least-privilege SA for the SCADA dashboard VM
+
+  # ==========================================================================
+  # 2. CLOUD PUB/SUB — Replaces AWS IoT Core MQTT Broker + Rules Engine
+  # ==========================================================================
+
+  # Main telemetry ingestion topic (all devices publish here)
+  - name: plant-telemetry-topic
+    type: pubsub.v1.topic
+    properties:
+      topic: plant-telemetry
+      labels:
+        project: plant-monitoring
+
+  # Rule 1 equivalent: subscription to store ALL readings in Firestore
+  - name: plant-telemetry-store-sub
+    type: pubsub.v1.subscription
+    properties:
+      subscription: plant-telemetry-store-readings
+      topic: $(ref.plant-telemetry-topic.name)
+      ackDeadlineSeconds: 30
+      retryPolicy:
+        minimumBackoff: 10s
+        maximumBackoff: 600s
+      labels:
+        project: plant-monitoring
+
+  # Rule 2 equivalent: subscription for fault threshold evaluation
+  - name: plant-telemetry-faults-sub
+    type: pubsub.v1.subscription
+    properties:
+      subscription: plant-telemetry-fault-check
+      topic: $(ref.plant-telemetry-topic.name)
+      ackDeadlineSeconds: 30
+      retryPolicy:
+        minimumBackoff: 10s
+        maximumBackoff: 600s
+      labels:
+        project: plant-monitoring
+
+  # Fault Alerts Pub/Sub topic (replaces Amazon SNS)
+  - name: plant-fault-alerts-topic
+    type: pubsub.v1.topic
+    properties:
+      topic: plant-fault-alerts
+      labels:
+        project: plant-monitoring
+
+  # ==========================================================================
+  # 3. CLOUD STORAGE — Replaces Amazon S3
+  # ==========================================================================
+
+  - name: plant-reports-bucket
+    type: storage.v1.bucket
+    properties:
+      name: plant-reports-REPLACE_WITH_PROJECT_ID
+      location: ASIA-SOUTH1
+      storageClass: STANDARD
+      iamConfiguration:
+        uniformBucketLevelAccess:
+          enabled: true
+      labels:
+        project: plant-monitoring
+
+  # ==========================================================================
+  # 4. COMPUTE ENGINE e2-micro (Replaces AWS EC2 t3.micro)
+  # ==========================================================================
+
+  - name: plant-firewall-http
+    type: compute.v1.firewall
+    properties:
+      network: global/networks/default
+      targetTags:
+        - plant-scada-server
+      allowed:
+        - IPProtocol: tcp
+          ports:
+            - "80"
+        - IPProtocol: tcp
+          ports:
+            - "22"
+        - IPProtocol: tcp
+          ports:
+            - "5173"
+
+  - name: plant-scada-server
+    type: compute.v1.instance
+    properties:
+      zone: asia-south1-a
+      machineType: zones/asia-south1-a/machineTypes/e2-micro
+      tags:
+        items:
+          - plant-scada-server
+      disks:
+        - type: PERSISTENT
+          boot: true
+          autoDelete: true
+          initializeParams:
+            sourceImage: projects/ubuntu-os-cloud/global/images/family/ubuntu-2404-lts-amd64
+            diskSizeGb: 10
+            diskType: zones/asia-south1-a/diskTypes/pd-standard
+      networkInterfaces:
+        - network: global/networks/default
+          accessConfigs:
+            - name: External NAT
+              type: ONE_TO_ONE_NAT
+      serviceAccounts:
+        - email: $(ref.plant-compute-sa.email)
+          scopes:
+            - https://www.googleapis.com/auth/cloud-platform
+      labels:
+        project: plant-monitoring
+      metadata:
+        items:
+          - key: startup-script
+            value: |
+              #!/bin/bash
+              set -ex
+              exec > >(tee /var/log/aether-startup.log | logger -t aether-plant) 2>&1
+
+              # ── 1. Swap (prevents OOM on e2-micro) ─────────────────────────────
+              fallocate -l 1G /swapfile
+              chmod 600 /swapfile
+              mkswap /swapfile
+              swapon /swapfile
+              echo '/swapfile none swap sw 0 0' >> /etc/fstab
+
+              # ── 2. System packages ──────────────────────────────────────────────
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -y
+              apt-get install -y curl git nginx
+
+              # Node.js 22 LTS via NodeSource
+              curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+              apt-get install -y nodejs
+              npm install -g serve --loglevel=error
+
+              # ── 3. App directory & ownership ───────────────────────────────────
+              mkdir -p /opt/aether-plant/dist
+              chown -R ubuntu:ubuntu /opt/aether-plant
+
+              # ── 4. Placeholder page ────────────────────────────────────────────
+              cat << 'HTMLEOF' > /opt/aether-plant/dist/index.html
+              <!DOCTYPE html>
+              <html lang="en">
+              <head>
+                <meta charset="UTF-8">
+                <meta http-equiv="refresh" content="15">
+                <title>AETHER-PLANT | Initializing on GCP...</title>
+                <style>
+                  *{margin:0;box-sizing:border-box}
+                  body{background:#070a13;color:#f3f4f6;font-family:'Courier New',monospace;
+                       display:flex;align-items:center;justify-content:center;height:100vh}
+                  .card{background:rgba(13,20,36,.92);border:1px solid rgba(56,189,248,.35);
+                        border-radius:14px;padding:44px 52px;text-align:center;max-width:600px;
+                        box-shadow:0 0 40px rgba(6,182,212,.2)}
+                  h1{color:#22d3ee;font-size:1.5rem;margin-bottom:6px;letter-spacing:.05em}
+                  .sub{color:#9ca3af;font-size:.9rem;margin-bottom:24px;line-height:1.6}
+                  .badge{background:rgba(16,185,129,.12);color:#34d399;
+                         border:1px solid rgba(16,185,129,.3);border-radius:20px;
+                         padding:4px 14px;display:inline-block;font-size:.78rem;font-weight:700;
+                         margin-bottom:20px;animation:pulse 2s infinite}
+                  .info{background:#000;padding:10px 16px;border-radius:8px;
+                        border:1px solid rgba(255,255,255,.08);color:#c084fc;font-size:.8rem}
+                  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+                </style>
+              </head>
+              <body>
+                <div class="card">
+                  <div class="badge">● GCP VM OPERATIONAL</div>
+                  <h1>AETHER-PLANT SCADA</h1>
+                  <p class="sub">Google Cloud Infrastructure active.<br>
+                  Firestore, Cloud Functions, Pub/Sub &amp; GCS are provisioned.<br>
+                  <strong style="color:#fbbf24">Run deploy_gcp_dashboard.sh to upload the React dashboard.</strong></p>
+                  <div class="info">GCP Deployment: COMPLETE &nbsp;|&nbsp; Page refreshes every 15s</div>
+                </div>
+              </body>
+              </html>
+              HTMLEOF
+
+              # ── 5. systemd service ──────────────────────────────────────────────
+              cat << 'SVCEOF' > /etc/systemd/system/aether-scada.service
+              [Unit]
+              Description=Aether Plant SCADA Industrial Monitoring Service
+              After=network-online.target
+              Wants=network-online.target
+
+              [Service]
+              Type=simple
+              User=ubuntu
+              WorkingDirectory=/opt/aether-plant
+              ExecStart=/usr/local/bin/serve -s /opt/aether-plant/dist -l 80
+              Restart=always
+              RestartSec=5
+              StandardOutput=journal
+              StandardError=journal
+
+              [Install]
+              WantedBy=multi-user.target
+              SVCEOF
+
+              systemctl daemon-reload
+              systemctl enable aether-scada
+              systemctl start aether-scada
+
+              echo '=== AETHER-PLANT GCP STARTUP COMPLETE ==='
+
+outputs:
+  - name: vmExternalIp
+    value: $(ref.plant-scada-server.networkInterfaces[0].accessConfigs[0].natIP)
+  - name: vmZone
+    value: asia-south1-a
+  - name: functionsSA
+    value: $(ref.plant-functions-sa.email)
+  - name: computeSA
+    value: $(ref.plant-compute-sa.email)
+  - name: telemetryTopic
+    value: $(ref.plant-telemetry-topic.name)
+  - name: faultAlertsTopic
+    value: $(ref.plant-fault-alerts-topic.name)

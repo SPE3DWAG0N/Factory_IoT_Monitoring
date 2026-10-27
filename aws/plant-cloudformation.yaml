@@ -1,0 +1,605 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Aether Plant: Cloud IoT Monitoring with Blockchain-Verified Service Reports
+  Complete Infrastructure Deployment for AWS ap-south-1 (Mumbai).
+  Provisions DynamoDB tables, S3 private bucket, SNS email alerts,
+  Lambda fault handler, AWS IoT Core Rules (Rule 1 & Rule 2),
+  SSM Parameter Store, and EC2 t3.micro hosting instance with systemd.
+
+Parameters:
+  AlertEmail:
+    Type: String
+    Default: 'engineer@plant-iot.internal'
+    Description: Email address for critical machine fault alerts (can be subscribed in SNS console).
+
+  ServicePassword:
+    Type: String
+    NoEcho: true
+    Default: 'plant-admin-2026'
+    Description: Password for field engineers to authenticate at the Service Desk.
+
+  SepoliaRpcUrl:
+    Type: String
+    Default: 'https://eth-sepolia.g.alchemy.com/v2/demo-key'
+    Description: Ethereum Sepolia JSON-RPC Endpoint (Alchemy / Infura).
+
+  ContractAddress:
+    Type: String
+    Default: '0x8A791620dd6260079BF849Dc5567aDC3F2FdC318'
+    Description: Deployed ServiceReportRegistry contract address on Ethereum Sepolia.
+
+  LatestUbuntuAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id'
+    Description: Automatically resolves official Ubuntu 24.04 LTS AMI for any active AWS region.
+
+Resources:
+
+  # =========================================================================
+  # 1. DYNAMODB TABLES (PROVISIONED FREE-TIER COMPLIANT)
+  # =========================================================================
+
+  PlantReadingsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: plant-readings
+      BillingMode: PROVISIONED
+      ProvisionedThroughput:
+        ReadCapacityUnits: 10
+        WriteCapacityUnits: 10
+      AttributeDefinitions:
+        - AttributeName: device_id
+          AttributeType: S
+        - AttributeName: ts
+          AttributeType: N
+      KeySchema:
+        - AttributeName: device_id
+          KeyType: HASH
+        - AttributeName: ts
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: expire_at
+        Enabled: true
+      Tags:
+        - Key: Project
+          Value: PlantMonitoring
+
+  PlantFaultsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: plant-faults
+      BillingMode: PROVISIONED
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      AttributeDefinitions:
+        - AttributeName: device_id
+          AttributeType: S
+        - AttributeName: fault_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: device_id
+          KeyType: HASH
+        - AttributeName: fault_id
+          KeyType: RANGE
+      Tags:
+        - Key: Project
+          Value: PlantMonitoring
+
+  PlantReportsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: plant-reports
+      BillingMode: PROVISIONED
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      AttributeDefinitions:
+        - AttributeName: fault_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: fault_id
+          KeyType: HASH
+      Tags:
+        - Key: Project
+          Value: PlantMonitoring
+
+  # =========================================================================
+  # 2. AMAZON S3 PRIVATE BUCKET
+  # =========================================================================
+
+  PlantReportsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'plant-reports-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Project
+          Value: PlantMonitoring
+
+  # =========================================================================
+  # 3. AMAZON SNS ALERT TOPIC & SUBSCRIPTION
+  # =========================================================================
+
+  PlantFaultAlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: plant-fault-alerts
+      DisplayName: Plant IoT Critical Fault Alerts
+      Tags:
+        - Key: Project
+          Value: PlantMonitoring
+
+
+  # =========================================================================
+  # 4. IAM ROLES (LEAST PRIVILEGE)
+  # =========================================================================
+
+  PlantIoTRuleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: plant-iot-rule-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: iot.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DynamoDBPutReadings
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !GetAtt PlantReadingsTable.Arn
+
+  PlantLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: plant-lambda-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: FaultHandlingPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:Query
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource:
+                  - !GetAtt PlantFaultsTable.Arn
+                  - !Sub '${PlantFaultsTable.Arn}/*'
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref PlantFaultAlertsTopic
+
+  PlantEC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: plant-ec2-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: PlantDashboardAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt PlantReadingsTable.Arn
+                  - !GetAtt PlantFaultsTable.Arn
+                  - !GetAtt PlantReportsTable.Arn
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: !Sub '${PlantReportsBucket.Arn}/reports/*'
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/plant/*'
+
+  PlantEC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: plant-ec2-instance-profile
+      Roles:
+        - !Ref PlantEC2Role
+
+  # =========================================================================
+  # 5. AWS LAMBDA FAULT HANDLER (PYTHON 3.12)
+  # =========================================================================
+
+  PlantFaultHandlerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: plant-fault-handler
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      MemorySize: 128
+      Timeout: 10
+      Role: !GetAtt PlantLambdaRole.Arn
+      Environment:
+        Variables:
+          FAULTS_TABLE: !Ref PlantFaultsTable
+          TOPIC_ARN: !Ref PlantFaultAlertsTopic
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import time
+          import boto3
+          from botocore.exceptions import ClientError
+
+          FAULTS_TABLE = os.environ.get("FAULTS_TABLE", "plant-faults")
+          TOPIC_ARN = os.environ.get("TOPIC_ARN")
+
+          dynamodb = boto3.client("dynamodb")
+          sns = boto3.client("sns")
+
+          def lambda_handler(event, context):
+              device_id = event.get("device_id")
+              machine_id = event.get("machine_id", "UNKNOWN-MACHINE")
+              part = event.get("part", "general_assembly")
+              sensor_type = event.get("sensor_type")
+              value = float(event.get("value", 0.0))
+              unit = event.get("unit", "")
+
+              limits = {"temperature": 90.0, "vibration": 7.0, "current": 12.0}
+              limit = limits.get(sensor_type, 90.0)
+
+              now_ms = int(time.time() * 1000)
+              fault_id = f"F-{now_ms}"
+              created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+              transaction_items = [
+                  {
+                      "Put": {
+                          "TableName": FAULTS_TABLE,
+                          "Item": {
+                              "device_id": {"S": device_id},
+                              "fault_id": {"S": fault_id},
+                              "machine_id": {"S": machine_id},
+                              "part": {"S": part},
+                              "sensor_type": {"S": sensor_type},
+                              "value": {"N": str(value)},
+                              "limit": {"N": str(limit)},
+                              "unit": {"S": unit},
+                              "status": {"S": "OPEN"},
+                              "created_at": {"S": created_at}
+                          }
+                      }
+                  },
+                  {
+                      "Put": {
+                          "TableName": FAULTS_TABLE,
+                          "Item": {
+                              "device_id": {"S": device_id},
+                              "fault_id": {"S": "ACTIVE_MARKER"},
+                              "active_fault_id": {"S": fault_id},
+                              "created_at": {"S": created_at}
+                          },
+                          "ConditionExpression": "attribute_not_exists(device_id)"
+                      }
+                  }
+              ]
+
+              try:
+                  dynamodb.transact_write_items(TransactItems=transaction_items)
+              except ClientError as e:
+                  if e.response["Error"]["Code"] == "TransactionCanceledException":
+                      return {"statusCode": 200, "body": json.dumps({"status": "DUPLICATE_OPEN_FAULT_SUPPRESSED"})}
+                  raise e
+
+              subject = f"CRITICAL LIMIT BREACH: [{device_id}] {part.upper()} on {machine_id}"
+              message = (
+                  f"AETHER INDUSTRIAL PLANT - EMERGENCY TELEMETRY BREACH\n\n"
+                  f"Fault ID:       {fault_id}\n"
+                  f"Machine:        {machine_id}\n"
+                  f"Device:         {device_id} ({part})\n"
+                  f"Metric:         {sensor_type.capitalize()}\n"
+                  f"Recorded Value: {value} {unit}\n"
+                  f"Safety Limit:   {limit} {unit}\n"
+                  f"Time (UTC):     {created_at}\n\n"
+                  f"Status: Device active marker registered in DynamoDB.\n"
+                  f"Field engineers must upload and anchor a certified service report to clear this lock."
+              )
+
+              try:
+                  if TOPIC_ARN:
+                      sns.publish(TopicArn=TOPIC_ARN, Subject=subject[:100], Message=message)
+              except Exception as err:
+                  print(f"SNS publish error: {err}")
+
+              return {"statusCode": 200, "body": json.dumps({"fault_id": fault_id, "status": "OPEN"})}
+      Tags:
+        - Key: Project
+          Value: PlantMonitoring
+
+  PlantIoTLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref PlantFaultHandlerFunction
+      Action: lambda:InvokeFunction
+      Principal: iot.amazonaws.com
+      SourceArn: !Sub 'arn:aws:iot:${AWS::Region}:${AWS::AccountId}:rule/plant_rule2_faults'
+
+  # =========================================================================
+  # 6. AWS IOT CORE TOPIC RULES (RULE 1 & RULE 2)
+  # =========================================================================
+
+  PlantIoTRule1:
+    Type: AWS::IoT::TopicRule
+    Properties:
+      RuleName: plant_rule1_readings
+      TopicRulePayload:
+        RuleDisabled: false
+        Sql: >-
+          SELECT *, timestamp() AS ts, floor(timestamp()/1000) + 604800 AS expire_at FROM 'plant/+/+/telemetry'
+        Actions:
+          - DynamoDBv2:
+              RoleArn: !GetAtt PlantIoTRuleRole.Arn
+              PutItem:
+                TableName: !Ref PlantReadingsTable
+
+  PlantIoTRule2:
+    Type: AWS::IoT::TopicRule
+    Properties:
+      RuleName: plant_rule2_faults
+      TopicRulePayload:
+        RuleDisabled: false
+        Sql: >-
+          SELECT *, timestamp() AS ts FROM 'plant/+/+/telemetry' WHERE (sensor_type = 'temperature' AND value > 90) OR (sensor_type = 'vibration' AND value > 7) OR (sensor_type = 'current' AND value > 12)
+        Actions:
+          - Lambda:
+              FunctionArn: !GetAtt PlantFaultHandlerFunction.Arn
+
+  # =========================================================================
+  # 7. AWS SYSTEMS MANAGER PARAMETER STORE
+  # =========================================================================
+
+  SSMServicePassword:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /plant/dashboard/service_password
+      Type: String
+      Value: !Ref ServicePassword
+      Description: Field engineer Service Desk access password.
+
+  SSMSepoliaRpc:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /plant/ledger/rpc_url
+      Type: String
+      Value: !Ref SepoliaRpcUrl
+      Description: Sepolia RPC Node Provider.
+
+  SSMContractAddress:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /plant/ledger/contract_address
+      Type: String
+      Value: !Ref ContractAddress
+      Description: Sepolia ServiceReportRegistry smart contract address.
+
+  # =========================================================================
+  # 8. EC2 HOSTING INSTANCE (t3.micro Ubuntu 24.04 LTS with systemd)
+  # =========================================================================
+
+  PlantSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Aether Plant SCADA Dashboard
+      SecurityGroupIngress:
+        # SSH - required for rsync-based dashboard deploy
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        # HTTP - main dashboard port
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        # Dev port (secondary access)
+        - IpProtocol: tcp
+          FromPort: 5173
+          ToPort: 5173
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Project
+          Value: PlantMonitoring
+
+  PlantEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      # Resolves official Ubuntu 24.04 LTS AMI dynamically for current region
+      ImageId: !Ref LatestUbuntuAmiId
+      IamInstanceProfile: !Ref PlantEC2InstanceProfile
+      SecurityGroupIds:
+        - !Ref PlantSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 8
+            VolumeType: gp3
+            DeleteOnTermination: true
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -ex
+          exec > >(tee /var/log/aether-userdata.log | logger -t aether-plant) 2>&1
+
+          # ── 1. Swap (prevents OOM on t3.micro during node install) ──────────
+          fallocate -l 1G /swapfile
+          chmod 600 /swapfile
+          mkswap /swapfile
+          swapon /swapfile
+          echo '/swapfile none swap sw 0 0' >> /etc/fstab
+
+          # ── 2. System packages ───────────────────────────────────────────────
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -y
+          apt-get install -y curl git nginx
+
+          # Node.js 22 LTS via NodeSource
+          curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+          apt-get install -y nodejs
+
+          # Pre-install serve globally so systemd unit does NOT need npx/network
+          npm install -g serve --loglevel=error
+
+          # ── 3. App directory & ownership ─────────────────────────────────────
+          mkdir -p /opt/aether-plant/dist
+          chown -R ubuntu:ubuntu /opt/aether-plant
+
+          # ── 4. Placeholder page (auto-refreshes every 15s until real deploy) ─
+          cat << 'HTMLEOF' > /opt/aether-plant/dist/index.html
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta http-equiv="refresh" content="15">
+            <title>AETHER-PLANT | Initializing...</title>
+            <style>
+              *{margin:0;box-sizing:border-box}
+              body{background:#070a13;color:#f3f4f6;font-family:'Courier New',monospace;
+                   display:flex;align-items:center;justify-content:center;height:100vh}
+              .card{background:rgba(13,20,36,.92);border:1px solid rgba(56,189,248,.35);
+                    border-radius:14px;padding:44px 52px;text-align:center;max-width:600px;
+                    box-shadow:0 0 40px rgba(6,182,212,.2)}
+              h1{color:#22d3ee;font-size:1.5rem;margin-bottom:6px;letter-spacing:.05em}
+              .sub{color:#9ca3af;font-size:.9rem;margin-bottom:24px;line-height:1.6}
+              .badge{background:rgba(16,185,129,.12);color:#34d399;
+                     border:1px solid rgba(16,185,129,.3);border-radius:20px;
+                     padding:4px 14px;display:inline-block;font-size:.78rem;font-weight:700;
+                     margin-bottom:20px;animation:pulse 2s infinite}
+              .info{background:#000;padding:10px 16px;border-radius:8px;
+                    border:1px solid rgba(255,255,255,.08);color:#c084fc;font-size:.8rem}
+              @keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <div class="badge">● EC2 INSTANCE OPERATIONAL</div>
+              <h1>AETHER-PLANT SCADA</h1>
+              <p class="sub">AWS Cloud Infrastructure active.<br>
+              DynamoDB, Lambda Fault Handler, SNS Alerts &amp; S3 Reports are provisioned.<br>
+              <strong style="color:#fbbf24">Run deploy_dashboard.sh to upload the React dashboard.</strong></p>
+              <div class="info">CloudFormation Stack: CREATE_COMPLETE &nbsp;|&nbsp; Page refreshes every 15s</div>
+            </div>
+          </body>
+          </html>
+          HTMLEOF
+
+          # ── 5. systemd service — uses globally-installed serve on port 80 ────
+          cat << 'SVCEOF' > /etc/systemd/system/aether-scada.service
+          [Unit]
+          Description=Aether Plant SCADA Industrial Monitoring Service
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User=ubuntu
+          WorkingDirectory=/opt/aether-plant
+          ExecStart=/usr/local/bin/serve -s /opt/aether-plant/dist -l 80
+          Restart=always
+          RestartSec=5
+          StandardOutput=journal
+          StandardError=journal
+
+          [Install]
+          WantedBy=multi-user.target
+          SVCEOF
+
+          # ── 6. Enable & START the service (the missing step!) ────────────────
+          systemctl daemon-reload
+          systemctl enable aether-scada
+          systemctl start aether-scada
+
+          echo '=== AETHER-PLANT USERDATA COMPLETE ==='
+      Tags:
+        - Key: Name
+          Value: plant-scada-server
+        - Key: Project
+          Value: PlantMonitoring
+
+Outputs:
+  Region:
+    Description: AWS Deployment Region
+    Value: !Ref AWS::Region
+
+  DynamoDBReadingsTable:
+    Description: DynamoDB Readings Table
+    Value: !Ref PlantReadingsTable
+
+  DynamoDBFaultsTable:
+    Description: DynamoDB Faults Table
+    Value: !Ref PlantFaultsTable
+
+  DynamoDBReportsTable:
+    Description: DynamoDB Reports Table
+    Value: !Ref PlantReportsTable
+
+  S3ReportsBucket:
+    Description: S3 Encrypted Reports Bucket
+    Value: !Ref PlantReportsBucket
+
+  SNSTopicArn:
+    Description: Amazon SNS Topic ARN for Alerts
+    Value: !Ref PlantFaultAlertsTopic
+
+  LambdaFunctionArn:
+    Description: AWS Lambda Fault Handler ARN
+    Value: !GetAtt PlantFaultHandlerFunction.Arn
+
+  EC2PublicDns:
+    Description: Public DNS of the SCADA Cloud Server
+    Value: !GetAtt PlantEC2Instance.PublicDnsName
+
+  EC2PublicIp:
+    Description: Public IP of the SCADA Cloud Server
+    Value: !GetAtt PlantEC2Instance.PublicIp
+
+  DashboardAccessUrl:
+    Description: Browser Access URL for SCADA Dashboard (port 80)
+    Value: !Sub 'http://${PlantEC2Instance.PublicIp}/'

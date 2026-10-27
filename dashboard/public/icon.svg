@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stopColor="#0b0f19"/>
+      <stop offset="100%" stopColor="#070a13"/>
+    </linearGradient>
+    <linearGradient id="neonCyan" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stopColor="#22d3ee"/>
+      <stop offset="100%" stopColor="#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="neonPurple" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stopColor="#c084fc"/>
+      <stop offset="100%" stopColor="#7e22ce"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="8" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Dark Shield Base -->
+  <rect width="512" height="512" rx="100" fill="url(#bgGrad)"/>
+  <rect x="16" y="16" width="480" height="480" rx="84" fill="none" stroke="rgba(56, 189, 248, 0.3)" stroke-width="6"/>
+
+  <!-- Glowing Isometric SCADA Cube & Ring -->
+  <circle cx="256" cy="256" r="160" fill="none" stroke="rgba(56, 189, 248, 0.2)" stroke-width="4" stroke-dasharray="16 12"/>
+  <circle cx="256" cy="256" r="130" fill="none" stroke="url(#neonCyan)" stroke-width="8" filter="url(#glow)"/>
+
+  <!-- Central Chip / Hexagon -->
+  <polygon points="256,160 338,208 338,304 256,352 174,304 174,208" fill="#0f172a" stroke="url(#neonPurple)" stroke-width="8" filter="url(#glow)"/>
+
+  <!-- Telemetry Pulse & Blockchain Links -->
+  <path d="M 190 256 L 225 256 L 240 220 L 260 290 L 280 240 L 295 256 L 322 256" fill="none" stroke="#22d3ee" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)"/>
+  
+  <!-- Orbiting Satellite Nodes -->
+  <circle cx="256" cy="96" r="14" fill="#10b981" filter="url(#glow)"/>
+  <circle cx="396" cy="336" r="14" fill="#a855f7" filter="url(#glow)"/>
+  <circle cx="116" cy="336" r="14" fill="#38bdf8" filter="url(#glow)"/>
+</svg>

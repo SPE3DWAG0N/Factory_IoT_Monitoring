@@ -1,0 +1,22 @@
+# Dependency directories
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Sensitive Certificates & Keys (as mandated by iot_plan.pdf)
+certs/
+*.pem
+*.key
+*.crt
+
+# Environment variables & secrets
+.env
+.env.local
+
+# Build outputs
+dist/
+build/
+*.log
+.DS_Store

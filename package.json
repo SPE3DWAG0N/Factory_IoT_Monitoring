@@ -1,0 +1,23 @@
+{
+  "name": "cloud-iot-blockchain-monitoring",
+  "version": "1.0.0",
+  "description": "Cloud IoT Monitoring with Blockchain-Verified Service Reports (AWS ap-south-1 & Ethereum Sepolia)",
+  "scripts": {
+    "dev": "npm --prefix dashboard run dev",
+    "desktop": "npm --prefix dashboard run desktop",
+    "app": "npm --prefix dashboard run desktop",
+    "build": "npm --prefix dashboard run build",
+    "preview": "npm --prefix dashboard run preview",
+    "simulator": "python simulator/device_simulator.py"
+  },
+  "keywords": [
+    "aws-iot-core",
+    "dynamodb",
+    "lambda",
+    "ethereum-sepolia",
+    "scada",
+    "blockchain-verification"
+  ],
+  "author": "Industrial Reliability Engineering Team",
+  "license": "MIT"
+}
