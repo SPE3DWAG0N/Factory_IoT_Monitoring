@@ -1,193 +1,134 @@
-# Cloud IoT Monitoring with Blockchain-Verified Service Reports
+# Cloud IoT Monitoring with Blockchain-Verified Service Reports (AWS Version)
 
-**Architecture Platform:** Google Cloud Platform `asia-south1` (Mumbai)  
+**Architecture Platform:** Amazon Web Services `ap-south-1` (Mumbai)  
 **Blockchain Layer:** Ethereum Sepolia Testnet (Chain ID `11155111`)  
 **Frontend Interface:** Industrial Cyber-SCADA Digital Twin & Verification Station  
 
-> **Migration Note:** This project was originally built on AWS (ap-south-1). All AWS services have been replaced with 1:1 Google Cloud equivalents in the same Mumbai region. The blockchain layer, SCADA dashboard, sensor topology, and fault logic are fully preserved.
+> [!IMPORTANT]
+> **Active Branch**: `aws` (Amazon Web Services deployment)  
+> To switch to the Google Cloud Platform (GCP) version of this project, run:
+> ```bash
+> git checkout gcp
+> ```
 
 ---
 
-## AWS → GCP Service Mapping
+## 1. AWS Architecture Overview
 
-| AWS Service | Google Cloud Equivalent | Notes |
-|---|---|---|
-| AWS IoT Core (MQTT Broker) | **Cloud Pub/Sub** | `plant-telemetry` topic |
-| IoT Core Rules Engine (Rule 1) | **Cloud Functions** `plant-store-readings` | Triggered by `plant-telemetry-store-readings` subscription |
-| IoT Core Rules Engine (Rule 2) | **Cloud Functions** `plant-fault-handler` | Triggered by `plant-telemetry-fault-check` subscription |
-| AWS Lambda | **Cloud Functions Gen 2** (Python 3.12) | Firestore transactional write |
-| Amazon DynamoDB | **Cloud Firestore** (Native mode) | 3 collections: readings, faults, reports |
-| Amazon SNS | **SMTP Email** via Cloud Functions | Credentials in Secret Manager |
-| Amazon S3 | **Cloud Storage** (GCS) | Uniform Bucket-Level Access (= Block Public) |
-| AWS SSM Parameter Store | **Secret Manager** | plant-service-password, plant-sepolia-rpc-url, plant-contract-address |
-| AWS EC2 t3.micro | **Compute Engine e2-micro** | Ubuntu 24.04 LTS, asia-south1-a |
-| AWS CloudFormation | **gcloud CLI** (`deploy_gcp.sh`) | One-click deploy script |
-| AWS IAM Roles | **GCP Service Accounts** | plant-functions-sa, plant-compute-sa |
+This project provides an end-to-end industrial IoT monitoring and blockchain audit trail solution:
+1. **AWS IoT Core**: Receives mTLS X.509 authenticated sensor telemetry from 8 physical/virtual industrial Things with MQTT QoS 1.
+2. **Topic Rule 1 (`plant_rule1_readings`)**: Dynamically writes all sensor readings into Amazon DynamoDB `plant-readings` table with a 7-day automatic TTL expiration (`expire_at`).
+3. **Topic Rule 2 (`plant_rule2_faults`)**: SQL threshold monitor (`WHERE temperature > 90 OR vibration > 7 OR current > 12`) that routes limit breaches to AWS Lambda.
+4. **AWS Lambda (`plant-fault-handler`)**: Executes atomic DynamoDB conditional transaction (`attribute_not_exists`) on `ACTIVE_MARKER` to guarantee exactly 1 open fault per device and eliminates duplicate alerts.
+5. **Amazon SNS (`plant-fault-alerts`)**: Immediately dispatches critical email alerts with machine and device context to on-call reliability engineers.
+6. **Amazon S3 (`plant-reports-${AWS::AccountId}`)**: Private encrypted repository (SSE-AES256) storing tamper-proof maintenance service PDFs.
+7. **Amazon EC2 (`t3.micro` Ubuntu 24.04 LTS)**: Hosts the SCADA dashboard under systemd on port 80.
+8. **Ethereum Sepolia Blockchain**: Smart contract `ServiceReportRegistry.sol` anchors SHA-256 PDF hashes directly into public blocks for 0-gas public verification.
 
 ---
 
-## 1. Project Overview
+## 2. Machine & Sensor Topology
 
-This project provides an end-to-end industrial monitoring solution for critical rotating machinery. Telemetry from 8 virtual IoT devices is published to **Cloud Pub/Sub**, fanned out to two **Cloud Functions** (store-all-readings + threshold-check), stored in **Cloud Firestore**, and alerts sent via SMTP email. Certified maintenance reports are stored in **Cloud Storage** with their SHA-256 digests anchored on the **Ethereum Sepolia** public testnet.
-
----
-
-## 2. Machine & Device Topology
-
-| Machine | Device ID | Monitored Metric | Nominal Range | Alert Limit | Pub/Sub Topic |
+| Machine | Device ID | Monitored Metric | Nominal Range | Alert Limit | MQTT Topic |
 |---|---|---|---|---|---|
-| **Machine A: Motor-Pump Set** | `A1-MOTOR-TEMP` | Motor Winding Temp | 55–75 °C | **> 90.0 °C** | `plant-telemetry` |
-| | `A2-MOTOR-CURR` | Motor Supply Current | 7–10 A | **> 12.0 A** | `plant-telemetry` |
-| | `A3-MOTOR-VIB` | Drive-End Bearing Vib | 2–4.5 mm/s | **> 7.0 mm/s** | `plant-telemetry` |
-| | `A4-PUMP-VIB` | Pump Bearing Vib | 2–4.5 mm/s | **> 7.0 mm/s** | `plant-telemetry` |
-| **Machine B: Conveyor Drive** | `B1-MOTOR-TEMP` | Conveyor Motor Temp | 55–75 °C | **> 90.0 °C** | `plant-telemetry` |
-| | `B2-MOTOR-CURR` | Conveyor Supply Current | 7–10 A | **> 12.0 A** | `plant-telemetry` |
-| | `B3-GBOX-VIB` | Gearbox Housing Vib | 2–4.5 mm/s | **> 7.0 mm/s** | `plant-telemetry` |
-| | `B4-GBOX-TEMP` | Gearbox Oil Sump Temp | 55–75 °C | **> 90.0 °C** | `plant-telemetry` |
+| **Machine A: Motor-Pump Set** | `A1-MOTOR-TEMP` | Motor Winding Temp | 58–74 °C | **> 90.0 °C** | `plant/MACHINE-A/A1-MOTOR-TEMP/telemetry` |
+| | `A2-MOTOR-CURR` | Motor Supply Current | 7.2–9.8 A | **> 12.0 A** | `plant/MACHINE-A/A2-MOTOR-CURR/telemetry` |
+| | `A3-MOTOR-VIB` | Drive-End Bearing Vib | 2.1–4.2 mm/s | **> 7.0 mm/s** | `plant/MACHINE-A/A3-MOTOR-VIB/telemetry` |
+| | `A4-PUMP-VIB` | Pump Bearing Vib | 2.2–4.4 mm/s | **> 7.0 mm/s** | `plant/MACHINE-A/A4-PUMP-VIB/telemetry` |
+| **Machine B: Conveyor Drive** | `B1-MOTOR-TEMP` | Conveyor Motor Temp | 56–73 °C | **> 90.0 °C** | `plant/MACHINE-B/B1-MOTOR-TEMP/telemetry` |
+| | `B2-MOTOR-CURR` | Conveyor Supply Current | 7.5–9.9 A | **> 12.0 A** | `plant/MACHINE-B/B2-MOTOR-CURR/telemetry` |
+| | `B3-GBOX-VIB` | Gearbox Housing Vib | 2.3–4.5 mm/s | **> 7.0 mm/s** | `plant/MACHINE-B/B3-GBOX-VIB/telemetry` |
+| | `B4-GBOX-TEMP` | Gearbox Oil Sump Temp | 59–75 °C | **> 90.0 °C** | `plant/MACHINE-B/B4-GBOX-TEMP/telemetry` |
 
 ---
 
 ## 3. Repository Structure
 
 ```
-├── gcp/
-│   └── plant-deployment.yaml         # Google Cloud Deployment Manager config
-├── functions/
-│   ├── fault_handler.py              # Cloud Function: fault detection + Firestore + email alert
-│   ├── store_readings.py             # Cloud Function: store all telemetry to Firestore
-│   └── requirements.txt             # Python deps for Cloud Functions
-├── simulator/
-│   ├── device_simulator_gcp.py       # GCP Pub/Sub device simulator (replaces awsiotsdk)
-│   └── device_simulator.py          # Original AWS simulator (reference only)
-├── contracts/
-│   └── ServiceReportRegistry.sol    # Solidity 0.8.x contract (unchanged)
-├── lambda/
-│   └── fault_handler.py             # Original AWS Lambda (reference only)
 ├── aws/
-│   └── plant-cloudformation.yaml   # Original AWS template (reference only)
-├── dashboard/                       # Modern React + Vite Cyber-SCADA Dashboard
-│   └── src/
-│       ├── components/              # Digital Twin, Tiles, Service Desk, Verifier, CloudPipeline (GCP)
-│       ├── services/                # TelemetryEngine (GCP Pub/Sub simulation)
-│       └── constants/               # plantConfig.js (GCP region, Firestore, Pub/Sub)
-├── deploy_gcp.sh                    # ★ One-click GCP full stack deploy (gcloud CLI)
-├── deploy_gcp_dashboard.sh          # Dashboard SCP deploy to Compute Engine VM
-└── deploy_dashboard.sh             # Original AWS dashboard deploy (reference only)
+│   └── plant-cloudformation.yaml     # 1-Click CloudFormation Infrastructure Template
+├── lambda/
+│   └── fault_handler.py              # AWS Lambda fault handler function (Python 3.12)
+├── simulator/
+│   ├── provision_iot_things.py       # Provisions 8 IoT Things, X.509 certs, policies & ATS endpoint
+│   └── device_simulator.py           # IoT telemetry generator with mTLS AWS IoT Core & mock stream
+├── contracts/
+│   └── ServiceReportRegistry.sol     # Solidity 0.8.x contract for Sepolia testnet
+├── dashboard/                        # Cyber-SCADA React Dashboard (Vite + Lucide)
+├── deploy_cloud.sh                   # EC2 bootstrap script (Node.js 22 LTS + systemd serve)
+├── deploy_dashboard.sh               # Local build & rsync deploy script to EC2
+└── docs/
+    └── AWS_FREE_TIER_AND_CLOUDFORMATION_GUIDE.md  # Detailed step-by-step setup guide
 ```
 
 ---
 
-## 4. Quick Deployment — Google Cloud
+## 4. Quickstart: 3-Step AWS Deployment
 
-### Prerequisites
-1. [Install Google Cloud CLI](https://cloud.google.com/sdk/docs/install)
-2. Authenticate: `gcloud auth login`
-3. Create a project: `gcloud projects create <PROJECT_ID>`
-4. Enable billing on the project in the Cloud Console
+### Step 1: Deploy Cloud Infrastructure via CloudFormation
+1. Open the [AWS CloudFormation Console](https://ap-south-1.console.aws.amazon.com/cloudformation) in **ap-south-1 (Mumbai)**.
+2. Click **Create stack** -> **With new resources (standard)**.
+3. Select **Upload a template file** and choose `aws/plant-cloudformation.yaml`.
+4. Enter parameters:
+   - **Stack name**: `aether-plant-stack`
+   - **AlertEmail**: Your email address for critical machine fault notifications.
+   - **ServicePassword**: Access password for field engineers (default: `plant-admin-2026`).
+5. Acknowledge IAM resource creation and click **Submit**.
+6. Check your email inbox and click **Confirm subscription** in the SNS notification email.
 
-### One-Click Deploy
+### Step 2: Provision IoT Things & Certificates
+Run the automated provisioning script to register the 8 IoT Things in AWS IoT Core and download certificates:
 ```bash
-# Deploy all GCP infrastructure (Pub/Sub, Firestore, Cloud Functions, GCS, VM)
-bash deploy_gcp.sh <YOUR_GCP_PROJECT_ID> your-email@example.com
+# 1. Install boto3
+pip install boto3
+
+# 2. Run provisioning (generates certs/, keys, root CA, and endpoint.txt)
+python simulator/provision_iot_things.py
 ```
 
-This single script:
-1. Enables all required APIs
-2. Creates IAM service accounts with least-privilege bindings
-3. Creates Cloud Pub/Sub topics + subscriptions
-4. Creates Cloud Storage bucket
-5. Stores secrets in Secret Manager
-6. Deploys both Cloud Functions (Python 3.12, Gen 2)
-7. Initialises Firestore with TTL policy
-8. Creates Compute Engine e2-micro VM (Ubuntu 24.04 LTS)
-9. Outputs dashboard URL
-
-### Deploy Dashboard
+### Step 3: Start the Device Simulator
+Run the simulator to publish live telemetry:
 ```bash
-# After the VM is running, push the React build
-bash deploy_gcp_dashboard.sh <VM_EXTERNAL_IP> [~/.ssh/google_compute_engine]
+# Install AWS IoT Device SDK v2 (optional, falls back to local simulation if absent)
+pip install awsiotsdk
+
+# Start simulator (automatically detects certs/ and connects via mTLS)
+python simulator/device_simulator.py
 ```
+**Interactive CLI Commands:**
+- `inject A1-MOTOR-TEMP` — Spikes motor temperature past 90°C (triggers Rule 2 -> Lambda -> DynamoDB -> SNS Email).
+- `clear A1-MOTOR-TEMP` — Restores nominal temperature baseline.
+- `status` — Shows active anomaly injections and connection status.
+- `quit` — Exits simulator.
+
+### Step 4: Access the SCADA Dashboard
+- **Locally:**
+  ```bash
+  npm run dev
+  ```
+  Open `http://localhost:5173/` in your browser.
+- **On Cloud EC2:**
+  Get the public IP from CloudFormation Outputs (`DashboardAccessUrl`) or deploy the latest build via:
+  ```bash
+  bash deploy_dashboard.sh <EC2_PUBLIC_IP> <path_to_ssh_key.pem>
+  ```
 
 ---
 
-## 5. Run the GCP Device Simulator
+## 5. Branch Management: Deploying on AWS vs GCP
 
+This repository contains two independent, production-grade cloud configurations:
+
+| Branch | Target Cloud | Services Used | Switch Command |
+|---|---|---|---|
+| **`aws`** | Amazon Web Services | IoT Core, DynamoDB, Lambda, SNS, S3, EC2 | `git checkout aws` |
+| **`gcp`** | Google Cloud Platform | Pub/Sub, Firestore, Cloud Functions, GCS, Compute Engine | `git checkout gcp` |
+
+To switch branches:
 ```bash
-# Install dependencies
-pip install google-cloud-pubsub
+# Switch to AWS deployment:
+git checkout aws
 
-# Set credentials
-export GOOGLE_APPLICATION_CREDENTIALS=path/to/service-account-key.json
-export GCP_PROJECT_ID=your-gcp-project-id
-
-# Run simulator
-python simulator/device_simulator_gcp.py
+# Switch to Google Cloud deployment:
+git checkout gcp
 ```
-
-Console commands:
-- `inject A3-MOTOR-VIB` — spike vibration past threshold (triggers Cloud Function fault handler)
-- `clear A3-MOTOR-VIB` — restore nominal baseline
-- `status` — list active injections
-- `quit` — stop simulation
-
----
-
-## 6. Cloud Architecture Data Flow
-
-```
-[8 IoT Device Simulators]
-        │ publish JSON via google-cloud-pubsub SDK
-        ▼
-[Cloud Pub/Sub: plant-telemetry topic]
-        │
-        ├─── Subscription: plant-telemetry-store-readings
-        │           │
-        │           ▼
-        │    [Cloud Function: plant-store-readings]
-        │           │ write payload + expire_at TTL
-        │           ▼
-        │    [Firestore: plant-readings collection]
-        │
-        └─── Subscription: plant-telemetry-fault-check
-                    │
-                    ▼
-             [Cloud Function: plant-fault-handler]
-                    │ threshold check (temp>90 OR vib>7 OR curr>12)
-                    │ @transactional: get ACTIVE_MARKER → set fault + marker
-                    │
-                    ├──► [Firestore: plant-faults collection]
-                    │
-                    └──► [SMTP Email Alert] → engineer@plant-iot.internal
-
-[SCADA Dashboard (Compute Engine e2-micro)]
-        │ field engineer uploads PDF report
-        ├──► [Cloud Storage: plant-reports-<PROJECT_ID>]
-        └──► [Ethereum Sepolia: ServiceReportRegistry.storeHash()]
-                    │
-                    └──► Permanent on-chain cryptographic proof
-```
-
----
-
-## 7. GCP Free Tier Compatibility
-
-| Service | Usage | Free Tier Limit |
-|---|---|---|
-| Cloud Pub/Sub | ~8 msgs/10s = ~2.4K msg/hr | 10 GiB/month free |
-| Cloud Firestore | 3 collections, ~30 reads/min | 50K reads + 20K writes/day free |
-| Cloud Functions | Event-driven, <60s each | 2M invocations/month free |
-| Cloud Storage | PDF reports (< 1 GB) | 5 GB/month free |
-| Compute Engine e2-micro | 1 VM | 1 e2-micro free per month (us-central1 / us-east1 / us-west1)† |
-| Secret Manager | 4 secrets | 6 secrets free + 10K access/month |
-
-> † **Note:** Compute Engine free tier only applies in `us-central1`, `us-east1`, or `us-west1`. For Mumbai (`asia-south1`) you will incur small VM charges (~$6/month). To stay free-tier, change `REGION` and `ZONE` in `deploy_gcp.sh` to `us-central1` / `us-central1-a`.
-
----
-
-## 8. UI/UX Features (Unchanged)
-
-1. **Interactive Machine Digital Twin** — animated SVG schematics of Machine A (Motor-Pump) & Machine B (Conveyor)
-2. **Real-time Telemetry Tiles** — 8 live sensor tiles with sparklines and threshold bands
-3. **Service Desk** — password protected, generates ISO 55001 PDF, computes SHA-256, broadcasts `storeHash` to Sepolia
-4. **Public Verification Portal** — instant cryptographic match + 1-byte tamper demonstration
-5. **GCP Architecture Map** — interactive 4-layer pipeline showing GCP Pub/Sub → Cloud Functions → Firestore → GCS → Sepolia

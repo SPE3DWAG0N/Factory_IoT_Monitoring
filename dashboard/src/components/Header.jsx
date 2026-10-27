@@ -130,7 +130,7 @@ export default function Header({
               )}
             </div>
             <div className="font-mono" style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', gap: '12px' }}>
-              <span>GCP {PLANT_CONFIG.region} (Mumbai)</span>
+              <span>AWS {PLANT_CONFIG.region} (Mumbai)</span>
               <span>•</span>
               <span style={{ color: '#c084fc' }}>Sepolia Testnet (11155111)</span>
               <span>•</span>

@@ -1,16 +1,18 @@
 // Plant Configuration & Machine Specifications
-// GCP Migration: Pub/Sub + Firestore + Cloud Functions + GCS + Secret Manager
+// AWS ap-south-1 (Mumbai) & Ethereum Sepolia Testnet
 
 export const PLANT_CONFIG = {
-  region: 'asia-south1',            // GCP region (Mumbai) — same as AWS ap-south-1
-  regionName: 'GCP Mumbai',
+  region: 'ap-south-1',
+  regionName: 'AWS Mumbai',
   prefix: 'plant-',
   sepoliaChainId: 11155111,
   contractAddress: '0x8A791620dd6260079BF849Dc5567aDC3F2FdC318',
   alchemyRpc: 'https://eth-sepolia.g.alchemy.com/v2/demo-key',
-  gcsBucket: 'plant-reports-<PROJECT_ID>',  // GCS bucket (replaces Amazon S3)
-  pubsubTopic: 'plant-telemetry',           // Cloud Pub/Sub topic (replaces AWS IoT Core MQTT)
-  firestoreDb: '(default)',                 // Firestore database (replaces Amazon DynamoDB)
+  s3Bucket: 'plant-reports-849204918231',
+  dynamoDbReadings: 'plant-readings',
+  dynamoDbFaults: 'plant-faults',
+  dynamoDbReports: 'plant-reports',
+  snsTopicArn: 'arn:aws:sns:ap-south-1:849204918231:plant-fault-alerts',
   refreshInterval: 5000, // 5 seconds as specified in plan
   limits: {
     temperature: 90, // °C

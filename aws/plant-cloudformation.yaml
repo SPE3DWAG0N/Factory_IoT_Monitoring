@@ -134,6 +134,9 @@ Resources:
     Properties:
       TopicName: plant-fault-alerts
       DisplayName: Plant IoT Critical Fault Alerts
+      Subscription:
+        - Endpoint: !Ref AlertEmail
+          Protocol: email
       Tags:
         - Key: Project
           Value: PlantMonitoring
@@ -381,6 +384,7 @@ Resources:
 
   PlantIoTRule2:
     Type: AWS::IoT::TopicRule
+    DependsOn: PlantIoTLambdaPermission
     Properties:
       RuleName: plant_rule2_faults
       TopicRulePayload:
@@ -486,6 +490,9 @@ Resources:
 
           # Pre-install serve globally so systemd unit does NOT need npx/network
           npm install -g serve --loglevel=error
+          SERVE_BIN=$(command -v serve || which serve || echo "/usr/bin/serve")
+          ln -sf "$SERVE_BIN" /usr/local/bin/serve 2>/dev/null || true
+          ln -sf "$SERVE_BIN" /usr/bin/serve 2>/dev/null || true
 
           # ── 3. App directory & ownership ─────────────────────────────────────
           mkdir -p /opt/aether-plant/dist

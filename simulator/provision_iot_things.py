@@ -1,12 +1,13 @@
 """
 AWS IoT Core Device Provisioning Script (Phase 2)
 Provisions the 8 IoT Things, X.509 certificates, and plant-device-policy.
-Outputs certificates into the git-ignored certs/ folder.
+Outputs certificates, AmazonRootCA1.pem, and endpoint.txt into the git-ignored certs/ folder.
 """
 
 import os
 import sys
 import json
+import urllib.request
 
 DEVICES = [
     "A1-MOTOR-TEMP", "A2-MOTOR-CURR", "A3-MOTOR-VIB", "A4-PUMP-VIB",
@@ -14,7 +15,7 @@ DEVICES = [
 ]
 
 POLICY_NAME = "plant-device-policy"
-REGION = os.environ.get("AWS_REGION", "ap-southeast-2")
+REGION = os.environ.get("AWS_REGION", "ap-south-1")
 
 DEVICE_POLICY_DOCUMENT = {
     "Version": "2012-10-17",
@@ -43,7 +44,31 @@ def provision():
     certs_dir = os.path.join(os.path.dirname(__file__), "..", "certs")
     os.makedirs(certs_dir, exist_ok=True)
 
-    print(f"[*] Ensuring IoT Policy '{POLICY_NAME}' exists...")
+    # 1. Fetch ATS Data Endpoint
+    try:
+        endpoint_resp = iot.describe_endpoint(endpointType="iot:Data-ATS")
+        endpoint_address = endpoint_resp.get("endpointAddress")
+        endpoint_file = os.path.join(certs_dir, "endpoint.txt")
+        with open(endpoint_file, "w") as f:
+            f.write(endpoint_address.strip())
+        print(f"[+] Discovered AWS IoT Data-ATS Endpoint: {endpoint_address}")
+        print(f"[*] Saved endpoint to: {endpoint_file}")
+    except Exception as e:
+        print(f"[!] Warning: Could not auto-discover IoT endpoint: {e}")
+
+    # 2. Download Amazon Root CA 1
+    root_ca_path = os.path.join(certs_dir, "AmazonRootCA1.pem")
+    if not os.path.exists(root_ca_path):
+        print("[*] Downloading Amazon Root CA 1 certificate...")
+        try:
+            url = "https://www.amazontrust.com/repository/AmazonRootCA1.pem"
+            urllib.request.urlretrieve(url, root_ca_path)
+            print(f"[+] Downloaded AmazonRootCA1.pem to {root_ca_path}")
+        except Exception as e:
+            print(f"[!] Warning: Could not download AmazonRootCA1.pem: {e}")
+
+    # 3. Create or Update IoT Policy
+    print(f"\n[*] Ensuring IoT Policy '{POLICY_NAME}' exists in {REGION}...")
     try:
         iot.create_policy(
             policyName=POLICY_NAME,
@@ -53,17 +78,18 @@ def provision():
     except iot.exceptions.ResourceAlreadyExistsException:
         print(f"[*] Policy {POLICY_NAME} already exists.")
 
+    # 4. Provision Things & Certificates
     for thing_name in DEVICES:
         print(f"\n[*] Provisioning Thing: {thing_name}...")
         
-        # 1. Create Thing
+        # 4a. Create Thing
         try:
             iot.create_thing(thingName=thing_name)
             print(f"[+] Created Thing: {thing_name}")
         except iot.exceptions.ResourceAlreadyExistsException:
             print(f"[*] Thing {thing_name} already exists.")
 
-        # 2. Create Keys and Certificate
+        # 4b. Create Keys and Certificate
         cert_resp = iot.create_keys_and_certificate(setAsActive=True)
         cert_arn = cert_resp["certificateArn"]
         cert_id = cert_resp["certificateId"]
@@ -76,14 +102,14 @@ def provision():
         with open(key_path, "w") as f:
             f.write(cert_resp["keyPair"]["PrivateKey"])
 
-        # 3. Attach Policy to Certificate
+        # 4c. Attach Policy to Certificate
         iot.attach_policy(policyName=POLICY_NAME, target=cert_arn)
 
-        # 4. Attach Certificate to Thing
+        # 4d. Attach Certificate to Thing
         iot.attach_thing_principal(thingName=thing_name, principal=cert_arn)
         print(f"[+] Attached active certificate {cert_id[:10]}... to {thing_name}")
 
-    print("\n[✔] Successfully provisioned all 8 IoT Things in AWS IoT Core (ap-south-1)!")
+    print(f"\n[✔] Successfully provisioned all 8 IoT Things in AWS IoT Core ({REGION})!")
     print(f"[*] Certificates and private keys stored safely in: {certs_dir}")
 
 if __name__ == "__main__":

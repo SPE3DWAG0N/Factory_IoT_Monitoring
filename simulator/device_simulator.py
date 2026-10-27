@@ -7,10 +7,18 @@ Simulates 8 industrial IoT Things across 2 machines:
 - Machine A: Motor-Pump Set (A1-MOTOR-TEMP, A2-MOTOR-CURR, A3-MOTOR-VIB, A4-PUMP-VIB)
 - Machine B: Conveyor Drive (B1-MOTOR-TEMP, B2-MOTOR-CURR, B3-GBOX-VIB, B4-GBOX-TEMP)
 
-Includes:
-- Bounded random walk inside nominal baseline ranges.
-- Console CLI: 'inject <device_id>' and 'clear <device_id>'
-- Support for mTLS with AWS IoT Core or local simulation loop.
+Modes:
+1. Real AWS IoT Core mTLS Mode:
+   Automatically activated when 'awsiotsdk' is installed and certificates exist in certs/
+   (or AWS_IOT_ENDPOINT is set). Telemetry is published over MQTT with TLS v1.3.
+2. Local Mock Stream Mode:
+   Runs in-memory simulation with bounded random walk when AWS credentials or certs are absent.
+
+Console CLI:
+- 'inject <device_id>' — Force metric past safety limit
+- 'clear <device_id>'  — Restore nominal baseline
+- 'status'             — Show active anomalies
+- 'quit' or 'exit'     — Stop simulator
 """
 
 import os
@@ -45,6 +53,76 @@ DEVICES = [
 
 injected_faults = set()
 running = True
+mqtt_connections = {}
+
+def get_iot_endpoint():
+    endpoint = os.environ.get("AWS_IOT_ENDPOINT")
+    if endpoint:
+        return endpoint.strip()
+    
+    certs_dir = os.path.join(os.path.dirname(__file__), "..", "certs")
+    endpoint_file = os.path.join(certs_dir, "endpoint.txt")
+    if os.path.exists(endpoint_file):
+        try:
+            with open(endpoint_file, "r") as f:
+                return f.read().strip()
+        except Exception:
+            pass
+    return None
+
+def init_mqtt_connection(thing_name, endpoint):
+    if not HAS_AWS_SDK or not endpoint:
+        return None
+    
+    certs_dir = os.path.join(os.path.dirname(__file__), "..", "certs")
+    cert_path = os.path.join(certs_dir, f"{thing_name}.cert.pem")
+    key_path = os.path.join(certs_dir, f"{thing_name}.private.key")
+    root_ca = os.path.join(certs_dir, "AmazonRootCA1.pem")
+
+    if not (os.path.exists(cert_path) and os.path.exists(key_path)):
+        return None
+
+    try:
+        connection = mqtt_connection_builder.mtls_from_path(
+            endpoint=endpoint,
+            cert_filepath=cert_path,
+            pri_key_filepath=key_path,
+            ca_filepath=root_ca if os.path.exists(root_ca) else None,
+            client_id=f"sim-{thing_name}-{int(time.time())}",
+            clean_session=False,
+            keep_alive_secs=30
+        )
+        connect_future = connection.connect()
+        connect_future.result(timeout=10)
+        return connection
+    except Exception as e:
+        print(f"[!] Warning: Could not connect {thing_name} to AWS IoT Core: {e}")
+        return None
+
+def setup_cloud_connections():
+    global mqtt_connections
+    endpoint = get_iot_endpoint()
+    if not endpoint:
+        print("[*] Note: AWS_IOT_ENDPOINT not found. Running in Local Mock Stream mode.")
+        print("    To publish to real AWS IoT Core:")
+        print("    1. Run: python simulator/provision_iot_things.py")
+        print("    2. Re-run: python simulator/device_simulator.py\n")
+        return
+
+    if not HAS_AWS_SDK:
+        print("[!] awsiotsdk not installed. Run: pip install awsiotsdk")
+        print("[*] Running in Local Mock Stream mode.\n")
+        return
+
+    print(f"[*] Connecting 8 IoT Things to AWS IoT Core endpoint: {endpoint}...")
+    for dev in DEVICES:
+        thing_id = dev["device_id"]
+        conn = init_mqtt_connection(thing_id, endpoint)
+        if conn:
+            mqtt_connections[thing_id] = conn
+            print(f"  [✓] Connected {thing_id} via mTLS X.509")
+        else:
+            print(f"  [-] Using local mock stream for {thing_id}")
 
 def generate_reading(dev_config):
     dev_id = dev_config["device_id"]
@@ -74,14 +152,32 @@ def generate_reading(dev_config):
 def simulation_loop(interval_sec=10):
     global running
     print(f"[*] Starting IoT telemetry stream (Publishing every {interval_sec}s for 8 devices)...")
-    print("[*] Available console commands: 'inject <device_id>', 'clear <device_id>', 'status', 'quit'")
+    print("[*] Console commands: 'inject <device_id>', 'clear <device_id>', 'status', 'quit'")
     
     while running:
         for dev in DEVICES:
+            dev_id = dev["device_id"]
             payload = generate_reading(dev)
-            topic = f"plant/{dev['machine_id']}/{dev['device_id']}/telemetry"
-            status_tag = "[ALERT CRITICAL]" if dev['device_id'] in injected_faults else "[NOMINAL]"
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] {status_tag} {topic} -> {payload['value']} {payload['unit']}")
+            topic = f"plant/{dev['machine_id']}/{dev_id}/telemetry"
+            status_tag = "[ALERT CRITICAL]" if dev_id in injected_faults else "[NOMINAL]"
+            
+            # Publish to real AWS IoT Core MQTT if connected
+            conn = mqtt_connections.get(dev_id)
+            if conn:
+                try:
+                    payload_json = json.dumps(payload)
+                    conn.publish(
+                        topic=topic,
+                        payload=payload_json,
+                        qos=mqtt.QoS.AT_LEAST_ONCE
+                    )
+                    mode_tag = "AWS-MQTT"
+                except Exception as e:
+                    mode_tag = f"ERR:{e}"
+            else:
+                mode_tag = "MOCK"
+
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] [{mode_tag}] {status_tag} {topic} -> {payload['value']} {payload['unit']}")
         time.sleep(interval_sec)
 
 def cli_listener():
@@ -111,12 +207,14 @@ def cli_listener():
                 print(f"[+] RESTORED NOMINAL BASELINE FOR: {target}")
             elif cmd == "status":
                 print(f"[*] Injected Anomalies: {list(injected_faults) or 'None (All Nominal)'}")
+                print(f"[*] Active AWS mTLS Connections: {len(mqtt_connections)}/8")
             else:
                 print("[-] Commands: inject <device_id>, clear <device_id>, status, quit")
         except EOFError:
             break
 
 if __name__ == "__main__":
+    setup_cloud_connections()
     t = threading.Thread(target=simulation_loop, args=(10,), daemon=True)
     t.start()
     cli_listener()

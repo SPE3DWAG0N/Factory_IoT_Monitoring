@@ -241,19 +241,19 @@ export class TelemetryEngine {
     this.notify();
   }
 
-  // GCP Cloud Functions plant-fault-handler simulation
+  // AWS Lambda plant-fault-handler simulation
   handleFaultDetection(sensor, value) {
     // Condition check: attribute_not_exists (one open fault per device)
-    // GCP: Firestore transaction get-then-set on ACTIVE_MARKER document
+    // DynamoDB conditional write: attribute_not_exists(device_id) on ACTIVE_MARKER item
     if (this.activeMarkers.has(sensor.deviceId)) {
       // Open fault already active for this device. Suppress duplicate alert.
       return;
     }
 
-    // Set ACTIVE marker (simulates Firestore ACTIVE_MARKER document write)
+    // Set ACTIVE marker (simulates DynamoDB ACTIVE_MARKER item)
     this.activeMarkers.add(sensor.deviceId);
 
-    // Create Fault Item in Firestore (plant-faults collection)
+    // Create Fault Item in DynamoDB (plant-faults table)
     const faultId = `F-${Date.now()}`;
     const newFault = {
       faultId,
@@ -266,19 +266,19 @@ export class TelemetryEngine {
       unit: sensor.unit,
       status: 'OPEN',
       createdAt: new Date().toISOString(),
-      snsDispatched: true  // kept for UI compatibility; means 'alertDispatched' on GCP
+      snsDispatched: true
     };
 
     this.faults.unshift(newFault);
     this.saveFaults();
 
-    // Trigger GCP Pub/Sub alert + Cloud Function email notification (simulation)
+    // Trigger Amazon SNS email notification (simulation)
     this.recentSNSAlert = {
       ...newFault,
-      topic: 'projects/<PROJECT_ID>/topics/plant-fault-alerts',
+      topic: PLANT_CONFIG.snsTopicArn || 'arn:aws:sns:ap-south-1:849204918231:plant-fault-alerts',
       timestamp: new Date().toISOString(),
       subject: `CRITICAL ALERT: Device Limit Exceeded [${sensor.deviceId}]`,
-      body: `GCP Pub/Sub Notification: Device ${sensor.deviceId} on ${sensor.machineId} (${sensor.part}) exceeded safety threshold. Observed: ${value} ${sensor.unit} (Limit: ${sensor.limit} ${sensor.unit}). Fault ID: ${faultId}.`
+      body: `Amazon SNS Notification: Device ${sensor.deviceId} on ${sensor.machineId} (${sensor.part}) exceeded safety threshold. Observed: ${value} ${sensor.unit} (Limit: ${sensor.limit} ${sensor.unit}). Fault ID: ${faultId}.`
     };
 
     sound.playAlarm();

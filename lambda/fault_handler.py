@@ -16,7 +16,7 @@ from botocore.exceptions import ClientError
 
 # Environment variables
 FAULTS_TABLE = os.environ.get("FAULTS_TABLE", "plant-faults")
-TOPIC_ARN = os.environ.get("TOPIC_ARN", "arn:aws:sns:ap-south-1:123456789012:plant-fault-alerts")
+TOPIC_ARN = os.environ.get("TOPIC_ARN")
 
 dynamodb = boto3.client("dynamodb")
 sns = boto3.client("sns")
@@ -118,13 +118,16 @@ def lambda_handler(event, context):
     )
 
     try:
-        sns.publish(
-            TopicArn=TOPIC_ARN,
-            Subject=subject[:100],
-            Message=message
-        )
-        print(f"Dispatched Amazon SNS alert email to {TOPIC_ARN}")
-    except ClientError as e:
+        if TOPIC_ARN:
+            sns.publish(
+                TopicArn=TOPIC_ARN,
+                Subject=subject[:100],
+                Message=message
+            )
+            print(f"Dispatched Amazon SNS alert email to {TOPIC_ARN}")
+        else:
+            print("TOPIC_ARN environment variable not set; skipping SNS dispatch.")
+    except Exception as e:
         print(f"SNS Publish Warning: {str(e)}")
 
     return {

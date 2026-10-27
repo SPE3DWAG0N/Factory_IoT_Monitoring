@@ -36,7 +36,7 @@ export default function SNSAlertBanner({ alert, onDismiss, onNavigateToService }
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span className="font-display" style={{ color: '#fca5a5', fontWeight: 700, fontSize: '0.9rem' }}>
-              GCP PUB/SUB CRITICAL ALERT DISPATCHED
+              AMAZON SNS CRITICAL EMAIL ALERT DISPATCHED
             </span>
             <span className="font-mono" style={{ fontSize: '0.7rem', color: '#fecaca', background: 'rgba(0,0,0,0.4)', padding: '2px 6px', borderRadius: '4px' }}>
               ID: {alert.faultId}
@@ -45,7 +45,7 @@ export default function SNSAlertBanner({ alert, onDismiss, onNavigateToService }
           <div className="font-mono" style={{ fontSize: '0.78rem', color: '#fee2e2', marginTop: '2px' }}>
             Threshold Breach: <strong style={{ color: '#fff' }}>{alert.deviceId}</strong> ({alert.part}) reported{' '}
             <span style={{ color: '#f87171', fontWeight: 700 }}>{alert.triggerValue} {alert.unit}</span>{' '}
-            (Safety Limit: {alert.limit} {alert.unit}). Cloud Function triggered atomic fault recording.
+            (Safety Limit: {alert.limit} {alert.unit}). AWS Lambda triggered atomic fault recording.
           </div>
         </div>
       </div>

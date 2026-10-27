@@ -34,6 +34,9 @@ echo "  ✓ Node $(node -v) / npm $(npm -v)"
 
 echo "=== [3/5] Pre-installing serve globally ==="
 sudo npm install -g serve --loglevel=error
+SERVE_BIN=$(command -v serve || which serve || echo "/usr/bin/serve")
+sudo ln -sf "$SERVE_BIN" /usr/local/bin/serve 2>/dev/null || true
+sudo ln -sf "$SERVE_BIN" /usr/bin/serve 2>/dev/null || true
 echo "  ✓ serve $(serve --version 2>/dev/null || echo 'installed')"
 
 echo "=== [4/5] Setting up SCADA app directory ==="

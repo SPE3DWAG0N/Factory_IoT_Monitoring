@@ -186,12 +186,12 @@ export default function App() {
         fontSize: '0.75rem'
       }}>
         <div className="font-mono">
-          Cloud IoT Monitoring with Blockchain-Verified Service Reports • GCP Mumbai (asia-south1) & Sepolia
+          Cloud IoT Monitoring with Blockchain-Verified Service Reports • AWS Mumbai (ap-south-1) & Sepolia
         </div>
         <div className="font-mono" style={{ display: 'flex', gap: '16px' }}>
-          <span>Firestore: Native Mode</span>
+          <span>DynamoDB: 20 RCU / 20 WCU</span>
           <span>•</span>
-          <span>Pub/Sub: Fan-Out Subscriptions</span>
+          <span>IoT Core: MQTT QoS 1</span>
           <span>•</span>
           <span>Solidity 0.8.x: 0 Gas Verify</span>
         </div>
