@@ -60,9 +60,20 @@ if [[ "$TARGET" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "  ✓ Upload complete"
   echo ""
 
-  echo "[4/4] Restarting SCADA service on GCP VM..."
-  ssh $KEY_FLAG -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" \
-    "sudo systemctl restart aether-scada && sudo systemctl status aether-scada --no-pager"
+  echo "[4/4] Ensuring serve binary and restarting SCADA service on GCP VM..."
+  ssh $KEY_FLAG -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" "bash -s" << 'EOF'
+    if ! command -v serve >/dev/null 2>&1 && [ ! -f /usr/local/bin/serve ] && [ ! -f /usr/bin/serve ]; then
+      sudo npm install -g serve --loglevel=error
+    fi
+    SERVE_BIN=$(which serve || command -v serve || ls /usr/bin/serve /usr/local/bin/serve 2>/dev/null | head -n 1)
+    if [ -n "$SERVE_BIN" ]; then
+      sudo ln -sf "$SERVE_BIN" /usr/local/bin/serve 2>/dev/null || true
+      sudo ln -sf "$SERVE_BIN" /usr/bin/serve 2>/dev/null || true
+    fi
+    sudo systemctl daemon-reload
+    sudo systemctl restart aether-scada
+    sudo systemctl status aether-scada --no-pager
+EOF
 
   echo ""
   echo "==================================================================="
@@ -88,9 +99,20 @@ else
   echo "  ✓ Upload complete"
   echo ""
 
-  echo "[4/4] Restarting SCADA service on GCP VM..."
-  gcloud compute ssh "$INSTANCE" --zone="$ZONE" \
-    --command="sudo systemctl restart aether-scada && sudo systemctl status aether-scada --no-pager" --quiet
+  echo "[4/4] Ensuring serve binary and restarting SCADA service on GCP VM..."
+  gcloud compute ssh "$INSTANCE" --zone="$ZONE" --command='
+    if ! command -v serve >/dev/null 2>&1 && [ ! -f /usr/local/bin/serve ] && [ ! -f /usr/bin/serve ]; then
+      sudo npm install -g serve --loglevel=error
+    fi
+    SERVE_BIN=$(which serve || command -v serve || ls /usr/bin/serve /usr/local/bin/serve 2>/dev/null | head -n 1)
+    if [ -n "$SERVE_BIN" ]; then
+      sudo ln -sf "$SERVE_BIN" /usr/local/bin/serve 2>/dev/null || true
+      sudo ln -sf "$SERVE_BIN" /usr/bin/serve 2>/dev/null || true
+    fi
+    sudo systemctl daemon-reload
+    sudo systemctl restart aether-scada
+    sudo systemctl status aether-scada --no-pager
+  ' --quiet
 
   VM_IP=$(gcloud compute instances describe "$INSTANCE" --zone="$ZONE" --format="get(networkInterfaces[0].accessConfigs[0].natIP)" 2>/dev/null || echo "<pending>")
 
