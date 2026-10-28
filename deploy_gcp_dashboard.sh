@@ -12,6 +12,16 @@
 # =============================================================================
 set -e
 
+# Load NVM (Node Version Manager) in non-interactive shells like Cloud Shell
+export NVM_DIR="$HOME/.nvm"
+if [ -s "$NVM_DIR/nvm.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$NVM_DIR/nvm.sh"
+elif [ -s "/usr/local/nvm/nvm.sh" ]; then
+  # shellcheck source=/dev/null
+  . "/usr/local/nvm/nvm.sh"
+fi
+
 TARGET="${1:-plant-scada-server}"
 ARG2="${2:-}"
 VM_USER="ubuntu"
@@ -27,15 +37,23 @@ echo "==================================================================="
 echo ""
 
 # --- Step 1: Build React production bundle locally ---
-echo "[1/4] Building React production bundle..."
+echo "[1/4] Preparing React production bundle..."
 cd "$DASHBOARD_DIR"
-if [ -f "package-lock.json" ]; then
-  npm ci --silent
+
+if command -v npm >/dev/null 2>&1; then
+  if [ -f "package-lock.json" ]; then
+    npm ci --silent 2>/dev/null || npm install --silent
+  else
+    npm install --silent
+  fi
+  npm run build
+  echo "  ✓ Build complete."
+elif [ -f "dist/index.html" ]; then
+  echo "  ✓ Using pre-built production bundle from dashboard/dist."
 else
-  npm install --silent
+  echo "[-] npm not found and dashboard/dist not found. Please install node/npm."
+  exit 1
 fi
-npm run build
-echo "  ✓ Build complete."
 echo ""
 
 # --- Determine deployment mode ---
