@@ -60,18 +60,38 @@ if [[ "$TARGET" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "  ✓ Upload complete"
   echo ""
 
-  echo "[4/4] Ensuring serve binary and restarting SCADA service on GCP VM..."
-  ssh $KEY_FLAG -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" "bash -s" << 'EOF'
-    if ! command -v serve >/dev/null 2>&1 && [ ! -f /usr/local/bin/serve ] && [ ! -f /usr/bin/serve ]; then
+  echo "[4/4] Configuring & starting SCADA service on GCP VM..."
+  ssh $KEY_FLAG -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" 'bash -s' << 'EOF'
+    sudo systemctl stop nginx 2>/dev/null || true
+    sudo systemctl disable nginx 2>/dev/null || true
+    sudo rm -f /usr/local/bin/serve
+    SERVE_PATH=$(which serve || command -v serve || ls /usr/bin/serve 2>/dev/null || echo "")
+    if [ -z "$SERVE_PATH" ] || [ ! -f "$SERVE_PATH" ]; then
       sudo npm install -g serve --loglevel=error
+      SERVE_PATH=$(which serve || command -v serve || ls /usr/bin/serve 2>/dev/null)
     fi
-    SERVE_BIN=$(which serve || command -v serve || ls /usr/bin/serve /usr/local/bin/serve 2>/dev/null | head -n 1)
-    if [ -n "$SERVE_BIN" ]; then
-      sudo ln -sf "$SERVE_BIN" /usr/local/bin/serve 2>/dev/null || true
-      sudo ln -sf "$SERVE_BIN" /usr/bin/serve 2>/dev/null || true
-    fi
+    sudo tee /etc/systemd/system/aether-scada.service > /dev/null << SVCEOF
+[Unit]
+Description=Aether Plant SCADA Industrial Monitoring Service (GCP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/aether-plant
+ExecStart=$SERVE_PATH -s /opt/aether-plant/dist -l 80
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
     sudo systemctl daemon-reload
     sudo systemctl restart aether-scada
+    sleep 1
     sudo systemctl status aether-scada --no-pager
 EOF
 
@@ -99,18 +119,38 @@ else
   echo "  ✓ Upload complete"
   echo ""
 
-  echo "[4/4] Ensuring serve binary and restarting SCADA service on GCP VM..."
+  echo "[4/4] Configuring & starting SCADA service on GCP VM..."
   gcloud compute ssh "$INSTANCE" --zone="$ZONE" --command='
-    if ! command -v serve >/dev/null 2>&1 && [ ! -f /usr/local/bin/serve ] && [ ! -f /usr/bin/serve ]; then
+    sudo systemctl stop nginx 2>/dev/null || true
+    sudo systemctl disable nginx 2>/dev/null || true
+    sudo rm -f /usr/local/bin/serve
+    SERVE_PATH=$(which serve || command -v serve || ls /usr/bin/serve 2>/dev/null || echo "")
+    if [ -z "$SERVE_PATH" ] || [ ! -f "$SERVE_PATH" ]; then
       sudo npm install -g serve --loglevel=error
+      SERVE_PATH=$(which serve || command -v serve || ls /usr/bin/serve 2>/dev/null)
     fi
-    SERVE_BIN=$(which serve || command -v serve || ls /usr/bin/serve /usr/local/bin/serve 2>/dev/null | head -n 1)
-    if [ -n "$SERVE_BIN" ]; then
-      sudo ln -sf "$SERVE_BIN" /usr/local/bin/serve 2>/dev/null || true
-      sudo ln -sf "$SERVE_BIN" /usr/bin/serve 2>/dev/null || true
-    fi
+    sudo tee /etc/systemd/system/aether-scada.service > /dev/null << SVCEOF
+[Unit]
+Description=Aether Plant SCADA Industrial Monitoring Service (GCP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/aether-plant
+ExecStart=$SERVE_PATH -s /opt/aether-plant/dist -l 80
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
     sudo systemctl daemon-reload
     sudo systemctl restart aether-scada
+    sleep 1
     sudo systemctl status aether-scada --no-pager
   ' --quiet
 

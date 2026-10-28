@@ -18,17 +18,15 @@ echo "  [✓] Swap enabled"
 # ── 2. System packages ──────────────────────────────────────────────────────
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y curl git nginx
+apt-get install -y curl git
 
 # Node.js 22 LTS via NodeSource
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
 apt-get install -y nodejs
 
-# Pre-install serve globally so systemd unit runs without npx/network on start
+# Pre-install serve globally
 npm install -g serve --loglevel=error
-SERVE_BIN=$(which serve || command -v serve || echo "/usr/bin/serve")
-ln -sf "$SERVE_BIN" /usr/local/bin/serve 2>/dev/null || true
-ln -sf "$SERVE_BIN" /usr/bin/serve 2>/dev/null || true
+SERVE_BIN=$(command -v serve || which serve || echo "/usr/bin/serve")
 echo "  [✓] Node $(node -v) / npm $(npm -v) / serve ($SERVE_BIN) installed"
 
 # ── 3. App directory & ownership ────────────────────────────────────────────
@@ -75,7 +73,7 @@ cat << 'HTMLEOF' > /opt/aether-plant/dist/index.html
 HTMLEOF
 
 # ── 5. systemd service — serve the React dashboard on port 80 ─────────────
-cat << 'SVCEOF' > /etc/systemd/system/aether-scada.service
+cat << SVCEOF > /etc/systemd/system/aether-scada.service
 [Unit]
 Description=Aether Plant SCADA Industrial Monitoring Service (GCP)
 After=network-online.target
@@ -83,9 +81,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=ubuntu
+User=root
 WorkingDirectory=/opt/aether-plant
-ExecStart=/usr/local/bin/serve -s /opt/aether-plant/dist -l 80
+ExecStart=$SERVE_BIN -s /opt/aether-plant/dist -l 80
 Restart=always
 RestartSec=5
 StandardOutput=journal
