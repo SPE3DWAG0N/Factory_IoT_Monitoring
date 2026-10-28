@@ -60,7 +60,7 @@ export default function TelemetryChart({ readings }) {
             </h3>
           </div>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-            DynamoDB plant-readings stream visualizer. Auto-refreshes per plant telemetry interval.
+            Cloud Firestore plant-readings stream visualizer. Auto-refreshes per plant telemetry interval.
           </p>
         </div>
 

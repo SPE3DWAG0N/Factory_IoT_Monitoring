@@ -23,11 +23,11 @@ export default function FaultsView({ faults, activeMarkers, onNavigateToService,
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <ShieldAlert size={22} color="#f87171" />
             <h2 className="font-display" style={{ fontSize: '1.2rem', color: '#fff' }}>
-              INCIDENT & FAULT AUDIT LOG (DYNAMODB: PLANT-FAULTS)
+              INCIDENT & FAULT AUDIT LOG (FIRESTORE: PLANT-FAULTS)
             </h2>
           </div>
           <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Continuous ingestion from AWS IoT Core Rule 2 & Lambda fault-handler. Enforces single active fault per device via DynamoDB transactions.
+            Continuous ingestion from Cloud Pub/Sub & Cloud Functions fault-handler. Enforces single active fault per device via Firestore transactions.
           </p>
         </div>
 
@@ -98,7 +98,7 @@ export default function FaultsView({ faults, activeMarkers, onNavigateToService,
               <th>Device & Part</th>
               <th>Breach Telemetry</th>
               <th>Created (UTC)</th>
-              <th>DynamoDB Lock</th>
+              <th>Firestore Lock</th>
               <th>Status</th>
               <th style={{ textAlign: 'right' }}>Actions</th>
             </tr>

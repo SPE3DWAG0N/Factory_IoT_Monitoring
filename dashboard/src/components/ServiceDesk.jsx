@@ -42,7 +42,7 @@ export default function ServiceDesk({
   
   // Anchoring state
   const [isAnchoring, setIsAnchoring] = useState(false);
-  const [anchorStep, setAnchorStep] = useState(0); // 0: Idle, 1: S3, 2: Sign/Web3, 3: Sepolia Mining, 4: DynamoDB, 5: Done
+  const [anchorStep, setAnchorStep] = useState(0); // 0: Idle, 1: GCS, 2: Sign/Web3, 3: Sepolia Mining, 4: Firestore, 5: Done
   const [anchorResult, setAnchorResult] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -123,7 +123,7 @@ export default function ServiceDesk({
     setAnchorResult(null);
 
     try {
-      // Step 1: Upload to S3
+      // Step 1: Upload to Google Cloud Storage (GCS)
       setAnchorStep(1);
       await new Promise(r => setTimeout(r, 600));
 
@@ -141,7 +141,7 @@ export default function ServiceDesk({
         deviceId: targetFault.deviceId
       });
 
-      // Step 4: Write DynamoDB plant-reports & update plant-faults
+      // Step 4: Write Firestore plant-reports & update plant-faults
       setAnchorStep(4);
       await new Promise(r => setTimeout(r, 500));
       onResolveFault(targetFault.faultId, reportId, receipt.txHash);
@@ -224,7 +224,7 @@ export default function ServiceDesk({
         </form>
 
         <div className="font-mono" style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '20px' }}>
-          AWS SSM Parameter: /plant/dashboard/service_password (Standard Tier SecureString)
+          Google Secret Manager: plant-service-password (SecretAccessor IAM Protected)
         </div>
       </div>
     );
@@ -311,7 +311,7 @@ export default function ServiceDesk({
                       Violation: {targetFault.triggerValue} {targetFault.unit} (Limit: {targetFault.limit} {targetFault.unit})
                     </div>
                     <div style={{ color: 'var(--text-muted)', marginTop: '2px' }}>
-                      Created at: {new Date(targetFault.createdAt).toLocaleString()} • DynamoDB Lock: ACTIVE
+                      Created at: {new Date(targetFault.createdAt).toLocaleString()} • Firestore Lock: ACTIVE
                     </div>
                   </div>
                 )}
@@ -420,13 +420,13 @@ export default function ServiceDesk({
                     </div>
                   </div>
 
-                  {/* S3 Storage Path */}
+                  {/* GCS Storage Path */}
                   <div style={{ background: 'rgba(0,0,0,0.3)', padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
                     <div className="font-mono" style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                      AWS S3 Target Location:
+                      Google Cloud Storage (GCS) Target Location:
                     </div>
                     <div className="font-mono" style={{ fontSize: '0.75rem', color: '#34d399' }}>
-                      s3://{PLANT_CONFIG.s3Bucket}/reports/{targetFault?.faultId}.pdf (SSE-S3 Encrypted)
+                      gs://{PLANT_CONFIG.gcsBucket || 'plant-reports-prod'}/reports/{targetFault?.faultId}.pdf (GCS AES-256 Encrypted)
                     </div>
                   </div>
 
@@ -436,10 +436,10 @@ export default function ServiceDesk({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#c084fc', fontSize: '0.82rem', fontWeight: 600 }}>
                         <Loader2 size={16} className="animate-spin" />
                         <span>
-                          {anchorStep === 1 && 'Uploading encrypted document to Amazon S3...'}
-                          {anchorStep === 2 && 'Signing transaction with web3.py & eth_account...'}
+                          {anchorStep === 1 && 'Uploading encrypted document to Google Cloud Storage (GCS)...'}
+                          {anchorStep === 2 && 'Signing transaction with web3 & eth_account...'}
                           {anchorStep === 3 && 'Mining block on Ethereum Sepolia testnet (Alchemy)...'}
-                          {anchorStep === 4 && 'Writing DynamoDB plant-reports & releasing active lock...'}
+                          {anchorStep === 4 && 'Writing Firestore plant-reports & releasing active lock...'}
                         </span>
                       </div>
                     </div>

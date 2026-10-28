@@ -2,15 +2,15 @@
 // GCP Migration: Pub/Sub + Firestore + Cloud Functions + GCS + Secret Manager
 
 export const PLANT_CONFIG = {
-  region: 'asia-south1',            // GCP region (Mumbai) — same as AWS ap-south-1
+  region: 'asia-south1',
   regionName: 'GCP Mumbai',
   prefix: 'plant-',
   sepoliaChainId: 11155111,
   contractAddress: '0x8A791620dd6260079BF849Dc5567aDC3F2FdC318',
   alchemyRpc: 'https://eth-sepolia.g.alchemy.com/v2/demo-key',
-  gcsBucket: 'plant-reports-<PROJECT_ID>',  // GCS bucket (replaces Amazon S3)
-  pubsubTopic: 'plant-telemetry',           // Cloud Pub/Sub topic (replaces AWS IoT Core MQTT)
-  firestoreDb: '(default)',                 // Firestore database (replaces Amazon DynamoDB)
+  gcsBucket: 'plant-reports-prod',  // Google Cloud Storage bucket
+  pubsubTopic: 'plant-telemetry',           // Google Cloud Pub/Sub topic
+  firestoreDb: '(default)',                 // Google Cloud Firestore database
   refreshInterval: 5000, // 5 seconds as specified in plan
   limits: {
     temperature: 90, // °C

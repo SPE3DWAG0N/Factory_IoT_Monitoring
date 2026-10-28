@@ -2,7 +2,7 @@ import React from 'react';
 import { Mail, AlertTriangle, ArrowRight, X } from 'lucide-react';
 import { sound } from '../utils/sound';
 
-export default function SNSAlertBanner({ alert, onDismiss, onNavigateToService }) {
+export default function CloudAlertBanner({ alert, onDismiss, onNavigateToService }) {
   if (!alert) return null;
 
   return (

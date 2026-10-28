@@ -22,80 +22,80 @@ export default function CloudPipeline() {
       subtitle: 'Python 3.12 + Google Cloud Pub/Sub SDK (google-cloud-pubsub)',
       color: '#38bdf8',
       details: [
-        '8 devices (4 on Machine A Motor-Pump, 4 on Machine B Conveyor).',
+        '8 virtual industrial machines (4 on Machine A Motor-Pump, 4 on Machine B Conveyor).',
         'Authenticates with GCP via Application Default Credentials (ADC) — Service Account JSON key.',
-        'Publishes JSON telemetry to Cloud Pub/Sub topic: projects/<PROJECT_ID>/topics/plant-telemetry.',
-        'Message attributes carry machine_id, device_id, sensor_type for server-side filtering.',
+        'Publishes structured JSON telemetry to Cloud Pub/Sub topic: projects/<PROJECT_ID>/topics/plant-telemetry.',
+        'Message attributes carry machine_id, device_id, sensor_type for high-speed routing.',
         'Console inject and clear commands to simulate anomalous conditions on demand.',
-        'Equivalent to: AWS IoT Device SDK v2 + mTLS X.509 cert auth to AWS IoT Core.'
+        'Standardized telemetry schema with ISO timestamp and calibrated engineering units.'
       ]
     },
     pubsub: {
       title: 'Google Cloud Pub/Sub (plant-telemetry topic)',
-      subtitle: 'asia-south1 (Mumbai) — Fully Managed Message Broker',
+      subtitle: 'asia-south1 (Mumbai) — Fully Managed Enterprise Message Broker',
       color: '#38bdf8',
       details: [
-        'Replaces: AWS IoT Core managed MQTT broker.',
+        'Central telemetry ingestion backbone for all industrial rotating equipment.',
         'Topic: plant-telemetry receives all sensor telemetry payloads.',
-        'Two pull subscriptions fan-out messages to two separate Cloud Functions:',
-        '  • plant-telemetry-store-readings → store-readings function (Rule 1 equivalent).',
-        '  • plant-telemetry-fault-check   → fault-handler function (Rule 2 equivalent).',
+        'Two subscriptions fan-out messages to two separate Cloud Functions:',
+        '  • plant-telemetry-store-readings → store-readings function (persists time-series readings).',
+        '  • plant-telemetry-fault-check   → fault-handler function (real-time threshold monitor).',
         'Guaranteed at-least-once delivery with configurable ack deadline and 7-day retention.',
-        'Separate topic plant-fault-alerts for alert notifications (replaces Amazon SNS).'
+        'Dedicated topic plant-fault-alerts for critical incident notifications and event routing.'
       ]
     },
     firestore: {
       title: 'Google Cloud Firestore (3 Collections)',
-      subtitle: 'Serverless NoSQL Document Store with TTL & Transactions',
+      subtitle: 'Serverless NoSQL Document Store with TTL & Atomic Transactions',
       color: '#34d399',
       details: [
-        'Replaces: Amazon DynamoDB (3 tables → 3 Firestore collections).',
+        'Cloud-native NoSQL database partitioned into 3 specialized collections:',
         'plant-readings: stores all sensor telemetry. expire_at field used by Firestore TTL policy to auto-purge after 7 days.',
         'plant-faults: documents keyed by {device_id}_{fault_id}. ACTIVE_MARKER document per device enforces uniqueness of open faults.',
-        'plant-reports: keyed by fault_id. Stores GCS object path, SHA-256 hash, tx_hash.',
-        'Firestore transactional writes enforce exactly-one-open-fault-per-device (mirrors DynamoDB attribute_not_exists ConditionExpression).',
-        'Native mode Firestore in asia-south1 with always-free 1 GiB storage + 50K reads/day.'
+        'plant-reports: keyed by fault_id. Stores GCS object path, SHA-256 hash, and on-chain tx_hash.',
+        'Firestore transactional writes enforce exactly-one-open-fault-per-device via atomic get-then-set locking.',
+        'Native mode Firestore in asia-south1 with automated multi-zone replication.'
       ]
     },
     functions: {
       title: 'Google Cloud Functions Gen 2 (2 Functions)',
-      subtitle: 'Python 3.12 Serverless Compute (256 MB)',
+      subtitle: 'Python 3.12 Serverless Microservices (256 MB)',
       color: '#fbbf24',
       details: [
-        'Replaces: AWS Lambda (plant-fault-handler).',
-        'plant-fault-handler: triggered by plant-telemetry-fault-check Pub/Sub subscription.',
+        'Event-driven serverless compute responding to Pub/Sub Eventarc triggers.',
+        'plant-fault-handler: triggered by plant-telemetry Pub/Sub subscription.',
         '  • Applies threshold gate: temperature > 90 OR vibration > 7 OR current > 12.',
         '  • Runs Firestore @transactional function: get ACTIVE_MARKER → if not exists, set fault + marker.',
-        '  • Sends SMTP email alert (replaces Amazon SNS email delivery).',
-        'plant-store-readings: triggered by plant-telemetry-store-readings subscription.',
+        '  • Dispatches automated emergency email alert to reliability engineering staff.',
+        'plant-store-readings: triggered by plant-telemetry subscription.',
         '  • Writes every payload to Firestore plant-readings with expire_at TTL field.',
-        '  • Equivalent to AWS IoT Core Rule 1 DynamoDBv2 action.',
+        '  • Zero-maintenance serverless scaling from 0 to thousands of concurrent messages.',
         'IAM: plant-functions-sa has roles/datastore.user + roles/pubsub.publisher only.'
       ]
     },
     alerts: {
-      title: 'SMTP Email Alert (via Cloud Functions)',
-      subtitle: 'Direct SMTP Delivery (replaces Amazon SNS Email)',
+      title: 'Emergency Incident Alert Dispatch',
+      subtitle: 'Automated Notification Pipeline via Cloud Functions',
       color: '#f87171',
       details: [
-        'Replaces: Amazon SNS email subscription.',
-        'Cloud Functions fault-handler sends email via SMTP (Gmail / SendGrid / any SMTP server).',
-        'Credentials stored in Google Secret Manager: plant-smtp-user, plant-smtp-pass.',
+        'Direct automated alert notification pipeline.',
+        'Cloud Functions fault-handler sends email via SMTP to on-call reliability engineers.',
+        'Credentials stored securely in Google Secret Manager: plant-smtp-user, plant-smtp-pass.',
         'Alert contains: Fault ID, Machine, Device, Part, Metric, Recorded Value, Safety Limit, Time UTC.',
-        'plant-fault-alerts Pub/Sub topic available for any downstream push notification integration.'
+        'plant-fault-alerts Pub/Sub topic available for downstream integrations and mobile push.'
       ]
     },
     gcs: {
       title: 'Google Cloud Storage (Private Bucket)',
-      subtitle: 'AES-256 Encrypted Object Store (replaces Amazon S3)',
+      subtitle: 'AES-256 Encrypted Object Store in asia-south1',
       color: '#38bdf8',
       details: [
-        'Replaces: Amazon S3 private bucket with Block Public Access.',
-        'Bucket: plant-reports-<PROJECT_ID> with Uniform Bucket-Level Access (equivalent to Block Public ACLs).',
-        'Google-managed AES-256 encryption by default (equivalent to SSE-S3).',
+        'Encrypted, immutable cloud repository for certified maintenance service PDFs.',
+        'Bucket: plant-reports-<PROJECT_ID> with Uniform Bucket-Level Access (UBLA) enabled.',
+        'Google-managed AES-256 encryption by default on all stored objects.',
         'Stores PDF maintenance reports at reports/{fault_id}.pdf.',
         'IAM: plant-compute-sa has roles/storage.objectAdmin on bucket only (least privilege).',
-        'Lifecycle policy: auto-migrate to NEARLINE storage class after 90 days.'
+        'Lifecycle policy: automated archive management with nearline transitions.'
       ]
     },
     sepolia: {
@@ -103,7 +103,7 @@ export default function CloudPipeline() {
       subtitle: 'ServiceReportRegistry Smart Contract (Solidity 0.8.x)',
       color: '#c084fc',
       details: [
-        'Unchanged from AWS architecture — blockchain layer is cloud-agnostic.',
+        'Decentralized immutable verification station and cryptographic audit trail.',
         'Public persistent testnet (Chain ID 11155111) via Alchemy RPC.',
         'storeHash(bytes32 reportId, bytes32 fileHash): Owner-only transaction, prevents hash overwrite.',
         'verify(bytes32 reportId, bytes32 fileHash): Read-only view function, 0 Gas cost.',
@@ -122,19 +122,19 @@ export default function CloudPipeline() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <Network size={22} color="#38bdf8" />
           <h2 className="font-display" style={{ fontSize: '1.25rem', color: '#fff' }}>
-            GCP CLOUD & BLOCKCHAIN ARCHITECTURE PIPELINE
+            GOOGLE CLOUD & BLOCKCHAIN ARCHITECTURE PIPELINE
           </h2>
           <span className="status-badge nominal" style={{ fontSize: '0.68rem' }}>
             END-TO-END DATAFLOW TOPOLOGY
           </span>
         </div>
         <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-          Interactive GCP architecture map. Click any subsystem to view IAM roles, Firestore schemas, and verification mechanics.
-          All AWS services have been mapped 1:1 to Google Cloud equivalents in the same Mumbai region (asia-south1).
+          Interactive Google Cloud architecture map. Click any subsystem to view IAM roles, Firestore schemas, and verification mechanics.
+          Production architecture leveraging Google Cloud native services in the Mumbai region (asia-south1) and Ethereum Sepolia.
         </p>
       </div>
 
-      {/* AWS → GCP Mapping Badge Row */}
+      {/* Google Cloud Native Services Stack Badge Row */}
       <div style={{
         display: 'flex',
         flexWrap: 'wrap',
@@ -146,16 +146,16 @@ export default function CloudPipeline() {
         border: '1px solid rgba(56, 189, 248, 0.15)'
       }}>
         {[
-          ['AWS IoT Core', 'Cloud Pub/Sub', '#38bdf8'],
-          ['AWS Lambda', 'Cloud Functions', '#fbbf24'],
-          ['Amazon DynamoDB', 'Cloud Firestore', '#34d399'],
-          ['Amazon SNS', 'SMTP via Cloud Fn', '#f87171'],
-          ['Amazon S3', 'Cloud Storage', '#38bdf8'],
-          ['AWS SSM', 'Secret Manager', '#c084fc'],
-          ['AWS EC2 t3.micro', 'Compute e2-micro', '#a78bfa'],
-          ['CloudFormation', 'gcloud CLI', '#94a3b8'],
-        ].map(([aws, gcp, color]) => (
-          <div key={aws} style={{
+          ['Cloud Pub/Sub', 'IoT Telemetry Broker', '#38bdf8'],
+          ['Cloud Functions Gen 2', 'Serverless FaaS', '#fbbf24'],
+          ['Cloud Firestore', 'NoSQL DB & TTL', '#34d399'],
+          ['Cloud Storage', 'Secure Reports GCS', '#38bdf8'],
+          ['Secret Manager', 'Key Management', '#c084fc'],
+          ['Compute Engine', 'SCADA Host (IaaS)', '#a78bfa'],
+          ['Firebase Hosting', 'Global Edge CDN', '#f59e0b'],
+          ['Ethereum Sepolia', 'Smart Contract Proofs', '#c084fc'],
+        ].map(([service, role, color]) => (
+          <div key={service} style={{
             display: 'flex',
             alignItems: 'center',
             gap: '6px',
@@ -165,9 +165,9 @@ export default function CloudPipeline() {
             borderRadius: '6px',
             border: '1px solid rgba(255,255,255,0.06)'
           }}>
-            <span style={{ color: '#9ca3af' }}>{aws}</span>
-            <span style={{ color: '#475569' }}>→</span>
-            <span style={{ color, fontWeight: 600 }}>{gcp}</span>
+            <span style={{ color, fontWeight: 700 }}>{service}</span>
+            <span style={{ color: '#475569' }}>•</span>
+            <span style={{ color: '#9ca3af' }}>{role}</span>
           </div>
         ))}
       </div>

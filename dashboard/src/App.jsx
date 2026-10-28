@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Header from './components/Header';
-import SNSAlertBanner from './components/SNSAlertBanner';
+import CloudAlertBanner from './components/CloudAlertBanner';
 import DigitalTwin from './components/DigitalTwin';
 import SensorTile from './components/SensorTile';
 import TelemetryChart from './components/TelemetryChart';
@@ -51,10 +51,10 @@ export default function App() {
         setStreamSpeed={(s) => telemetryEngine.setSpeed(s)}
       />
 
-      {/* Floating Amazon SNS Alert Banner */}
-      <SNSAlertBanner
-        alert={telemetryState.recentSNSAlert}
-        onDismiss={() => telemetryEngine.dismissSNSAlert()}
+      {/* Floating Google Cloud Pub/Sub Alert Banner */}
+      <CloudAlertBanner
+        alert={telemetryState.recentAlert}
+        onDismiss={() => telemetryEngine.dismissAlert()}
         onNavigateToService={handleNavigateToService}
       />
 

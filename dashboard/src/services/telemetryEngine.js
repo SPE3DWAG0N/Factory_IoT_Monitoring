@@ -1,4 +1,4 @@
-// Real-time IoT Telemetry & AWS DynamoDB/Lambda Fault Engine
+// Real-time IoT Telemetry & Google Cloud Firestore/Functions Fault Engine
 import { ALL_SENSORS, MACHINES, PLANT_CONFIG } from '../constants/plantConfig';
 import { sound } from '../utils/sound';
 
@@ -33,11 +33,12 @@ export class TelemetryEngine {
     // Populate initial 20 historical readings per sensor so charts look rich immediately
     this.populateInitialHistory();
 
-    // Fault state (simulating DynamoDB plant-faults table and ACTIVE markers)
+    // Fault state (simulating Firestore plant-faults collection and ACTIVE markers)
     this.activeMarkers = new Set(); // device_ids with an open fault
     this.faults = this.loadFaults();
 
     // Active SNS Alert notification queue
+    this.recentAlert = null;
     this.recentSNSAlert = null;
 
     this.startStream();
@@ -123,7 +124,8 @@ export class TelemetryEngine {
       faults: [...this.faults],
       activeMarkers: Array.from(this.activeMarkers),
       injectedSensors: Array.from(this.injectedSensors),
-      recentSNSAlert: this.recentSNSAlert,
+      recentAlert: this.recentAlert,
+      recentSNSAlert: this.recentAlert,
       isRunning: this.isRunning,
       streamSpeed: this.streamSpeed
     };
@@ -234,7 +236,7 @@ export class TelemetryEngine {
         cur.history.shift();
       }
 
-      // AWS IoT Core Rule 2 & Lambda Evaluation
+      // Google Cloud Pub/Sub & Cloud Functions Evaluation
       if (nextVal > sensor.limit) {
         this.handleFaultDetection(sensor, nextVal);
       }
@@ -275,7 +277,7 @@ export class TelemetryEngine {
     this.saveFaults();
 
     // Trigger GCP Pub/Sub alert + Cloud Function email notification (simulation)
-    this.recentSNSAlert = {
+    this.recentAlert = {
       ...newFault,
       topic: 'projects/<PROJECT_ID>/topics/plant-fault-alerts',
       timestamp: new Date().toISOString(),
@@ -287,6 +289,7 @@ export class TelemetryEngine {
   }
 
   dismissSNSAlert() {
+    this.recentAlert = null;
     this.recentSNSAlert = null;
     this.notify();
   }
@@ -320,6 +323,7 @@ export class TelemetryEngine {
   resetAll() {
     this.injectedSensors.clear();
     this.activeMarkers.clear();
+    this.recentAlert = null;
     this.recentSNSAlert = null;
     this.faults = this.loadFaults().filter(f => f.status === 'ANCHORED');
     this.saveFaults();
