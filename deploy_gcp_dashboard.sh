@@ -47,21 +47,16 @@ if [[ "$TARGET" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     KEY_FLAG="-i $ARG2"
   fi
 
-  echo "[2/4] Preparing remote Compute Engine VM via SSH ($VM_IP)..."
+  echo "[2/4] Preparing remote directories via SSH ($VM_IP)..."
   ssh $KEY_FLAG -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" \
-    "sudo mkdir -p $REMOTE_DIR && sudo chown -R ubuntu:ubuntu /opt/aether-plant"
-  echo "  ✓ Remote directory ready"
+    "mkdir -p ~/dashboard_staging && sudo mkdir -p $REMOTE_DIR"
+  echo "  ✓ Staging ready"
   echo ""
 
-  echo "[3/4] Uploading build artifacts to GCP VM ($VM_IP)..."
-  if command -v rsync >/dev/null 2>&1; then
-    rsync -avz --delete \
-      -e "ssh $KEY_FLAG -o StrictHostKeyChecking=no" \
-      "$DASHBOARD_DIR/dist/" \
-      "$VM_USER@$VM_IP:$REMOTE_DIR/"
-  else
-    scp $KEY_FLAG -r -o StrictHostKeyChecking=no "$DASHBOARD_DIR/dist/"* "$VM_USER@$VM_IP:$REMOTE_DIR/"
-  fi
+  echo "[3/4] Uploading build artifacts to VM ($VM_IP)..."
+  scp $KEY_FLAG -r -o StrictHostKeyChecking=no "$DASHBOARD_DIR/dist" "$VM_USER@$VM_IP:~/dashboard_staging/"
+  ssh $KEY_FLAG -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" \
+    "sudo cp -r ~/dashboard_staging/dist/* $REMOTE_DIR/ && sudo chmod -R 755 /opt/aether-plant && rm -rf ~/dashboard_staging"
   echo "  ✓ Upload complete"
   echo ""
 
@@ -80,18 +75,22 @@ else
   ZONE="${ARG2:-asia-south1-a}"
   INSTANCE="$TARGET"
 
-  echo "[2/4] Preparing remote Compute Engine VM via gcloud ($INSTANCE in $ZONE)..."
-  gcloud compute ssh "$INSTANCE" --zone="$ZONE" --command="sudo mkdir -p $REMOTE_DIR && sudo chown -R ubuntu:ubuntu /opt/aether-plant" --quiet
-  echo "  ✓ Remote directory ready"
+  echo "[2/4] Preparing remote staging on Compute Engine VM ($INSTANCE in $ZONE)..."
+  gcloud compute ssh "$INSTANCE" --zone="$ZONE" \
+    --command="mkdir -p ~/dashboard_staging && sudo mkdir -p $REMOTE_DIR" --quiet
+  echo "  ✓ Staging ready"
   echo ""
 
   echo "[3/4] Uploading build artifacts via gcloud compute scp..."
-  gcloud compute scp --recurse "$DASHBOARD_DIR/dist/"* "$INSTANCE:$REMOTE_DIR/" --zone="$ZONE" --quiet
+  gcloud compute scp --recurse "$DASHBOARD_DIR/dist" "$INSTANCE:~/dashboard_staging/" --zone="$ZONE" --quiet
+  gcloud compute ssh "$INSTANCE" --zone="$ZONE" \
+    --command="sudo cp -r ~/dashboard_staging/dist/* $REMOTE_DIR/ && sudo chmod -R 755 /opt/aether-plant && rm -rf ~/dashboard_staging" --quiet
   echo "  ✓ Upload complete"
   echo ""
 
   echo "[4/4] Restarting SCADA service on GCP VM..."
-  gcloud compute ssh "$INSTANCE" --zone="$ZONE" --command="sudo systemctl restart aether-scada && sudo systemctl status aether-scada --no-pager" --quiet
+  gcloud compute ssh "$INSTANCE" --zone="$ZONE" \
+    --command="sudo systemctl restart aether-scada && sudo systemctl status aether-scada --no-pager" --quiet
 
   VM_IP=$(gcloud compute instances describe "$INSTANCE" --zone="$ZONE" --format="get(networkInterfaces[0].accessConfigs[0].natIP)" 2>/dev/null || echo "<pending>")
 

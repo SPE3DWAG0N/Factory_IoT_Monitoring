@@ -44,10 +44,11 @@ Write-Host "  ✓ Build complete." -ForegroundColor Green
 # Step 2 & 3: Upload
 if ($VmIp -and ($VmIp -match "^\d+\.\d+\.\d+\.\d+$")) {
   Write-Host "`n[2/4] Preparing remote directory via SSH ($VmIp)..." -ForegroundColor Yellow
-  ssh -o StrictHostKeyChecking=no ubuntu@$VmIp "sudo mkdir -p $RemoteDir && sudo chown -R ubuntu:ubuntu /opt/aether-plant"
+  ssh -o StrictHostKeyChecking=no ubuntu@$VmIp "mkdir -p ~/dashboard_staging && sudo mkdir -p $RemoteDir"
 
   Write-Host "`n[3/4] Uploading build files to VM via SCP..." -ForegroundColor Yellow
-  scp -r -o StrictHostKeyChecking=no "$DashboardDir\dist\*" ubuntu@${VmIp}:${RemoteDir}/
+  scp -r -o StrictHostKeyChecking=no "$DashboardDir\dist" ubuntu@${VmIp}:~/dashboard_staging/
+  ssh -o StrictHostKeyChecking=no ubuntu@$VmIp "sudo cp -r ~/dashboard_staging/dist/* $RemoteDir/ && sudo chmod -R 755 /opt/aether-plant && rm -rf ~/dashboard_staging"
 
   Write-Host "`n[4/4] Restarting aether-scada service..." -ForegroundColor Yellow
   ssh -o StrictHostKeyChecking=no ubuntu@$VmIp "sudo systemctl restart aether-scada && sudo systemctl status aether-scada --no-pager"
@@ -58,10 +59,11 @@ if ($VmIp -and ($VmIp -match "^\d+\.\d+\.\d+\.\d+$")) {
   Write-Host "===================================================================" -ForegroundColor Green
 } else {
   Write-Host "`n[2/4] Preparing remote VM via gcloud compute ssh ($InstanceName in $Zone)..." -ForegroundColor Yellow
-  gcloud compute ssh $InstanceName --zone=$Zone --command="sudo mkdir -p $RemoteDir && sudo chown -R ubuntu:ubuntu /opt/aether-plant" --quiet
+  gcloud compute ssh $InstanceName --zone=$Zone --command="mkdir -p ~/dashboard_staging && sudo mkdir -p $RemoteDir" --quiet
 
   Write-Host "`n[3/4] Uploading build files via gcloud compute scp..." -ForegroundColor Yellow
-  gcloud compute scp --recurse "$DashboardDir\dist\*" "${InstanceName}:${RemoteDir}/" --zone=$Zone --quiet
+  gcloud compute scp --recurse "$DashboardDir\dist" "${InstanceName}:~/dashboard_staging/" --zone=$Zone --quiet
+  gcloud compute ssh $InstanceName --zone=$Zone --command="sudo cp -r ~/dashboard_staging/dist/* $RemoteDir/ && sudo chmod -R 755 /opt/aether-plant && rm -rf ~/dashboard_staging" --quiet
 
   Write-Host "`n[4/4] Restarting aether-scada service..." -ForegroundColor Yellow
   gcloud compute ssh $InstanceName --zone=$Zone --command="sudo systemctl restart aether-scada && sudo systemctl status aether-scada --no-pager" --quiet
@@ -73,4 +75,3 @@ if ($VmIp -and ($VmIp -match "^\d+\.\d+\.\d+\.\d+$")) {
   Write-Host "  Dashboard URL: http://$ExtIp/" -ForegroundColor Cyan
   Write-Host "===================================================================" -ForegroundColor Green
 }
-
