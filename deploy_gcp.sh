@@ -66,7 +66,36 @@ echo "  ✓ APIs enabled"
 
 # ── [2] IAM Service Accounts ─────────────────────────────────────────────────
 echo ""
-echo "=== [2/9] Creating IAM Service Accounts ==="
+echo "=== [2/9] Creating IAM Service Accounts & Build Permissions ==="
+
+PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)")
+echo "  [*] Project Number: $PROJECT_NUMBER"
+
+# Ensure service identities exist for Pub/Sub & Eventarc
+gcloud beta services identity create --service=pubsub.googleapis.com --project="$PROJECT_ID" --quiet 2>/dev/null || true
+gcloud beta services identity create --service=eventarc.googleapis.com --project="$PROJECT_ID" --quiet 2>/dev/null || true
+
+# Fix Cloud Build permissions (required for Cloud Functions Gen 2 builds in modern GCP)
+COMPUTE_DEFAULT_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+CLOUDBUILD_SA="${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com"
+
+for SA in "$COMPUTE_DEFAULT_SA" "$CLOUDBUILD_SA"; do
+  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+    --member="serviceAccount:$SA" \
+    --role="roles/logging.logWriter" --quiet 2>/dev/null || true
+  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+    --member="serviceAccount:$SA" \
+    --role="roles/artifactregistry.writer" --quiet 2>/dev/null || true
+  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+    --member="serviceAccount:$SA" \
+    --role="roles/storage.objectViewer" --quiet 2>/dev/null || true
+done
+
+# Grant Pub/Sub Service Agent token creator (required for Gen 2 Eventarc Pub/Sub triggers)
+PUBSUB_SA="service-${PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com"
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:$PUBSUB_SA" \
+  --role="roles/iam.serviceAccountTokenCreator" --quiet 2>/dev/null || true
 
 # Functions SA
 gcloud iam service-accounts create plant-functions-sa \

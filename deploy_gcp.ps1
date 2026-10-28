@@ -69,7 +69,28 @@ gcloud services enable `
 Write-Host "  ✓ APIs enabled" -ForegroundColor Green
 
 # ── [2] IAM Service Accounts ─────────────────────────────────────────────────
-Write-Host "`n=== [2/9] Creating IAM Service Accounts ===" -ForegroundColor Yellow
+Write-Host "`n=== [2/9] Creating IAM Service Accounts & Build Permissions ===" -ForegroundColor Yellow
+
+$ProjectNumber = (gcloud projects describe $ProjectId --format="value(projectNumber)").Trim()
+Write-Host "  [*] Project Number: $ProjectNumber"
+
+# Ensure service identities exist
+gcloud beta services identity create --service=pubsub.googleapis.com --project=$ProjectId --quiet 2>$null
+gcloud beta services identity create --service=eventarc.googleapis.com --project=$ProjectId --quiet 2>$null
+
+# Cloud Build permissions
+$ComputeDefaultSa = "${ProjectNumber}-compute@developer.gserviceaccount.com"
+$CloudBuildSa = "${ProjectNumber}@cloudbuild.gserviceaccount.com"
+
+foreach ($sa in @($ComputeDefaultSa, $CloudBuildSa)) {
+  gcloud projects add-iam-policy-binding $ProjectId --member="serviceAccount:$sa" --role="roles/logging.logWriter" --quiet 2>$null
+  gcloud projects add-iam-policy-binding $ProjectId --member="serviceAccount:$sa" --role="roles/artifactregistry.writer" --quiet 2>$null
+  gcloud projects add-iam-policy-binding $ProjectId --member="serviceAccount:$sa" --role="roles/storage.objectViewer" --quiet 2>$null
+}
+
+# Pub/Sub SA token creator for Gen 2 Eventarc
+$PubSubSa = "service-${ProjectNumber}@gcp-sa-pubsub.iam.gserviceaccount.com"
+gcloud projects add-iam-policy-binding $ProjectId --member="serviceAccount:$PubSubSa" --role="roles/iam.serviceAccountTokenCreator" --quiet 2>$null
 
 # Functions SA
 gcloud iam service-accounts create plant-functions-sa `
