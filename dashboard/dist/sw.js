@@ -1,5 +1,5 @@
 // Service Worker for Aether Plant SCADA PWA
-const CACHE_NAME = 'aether-scada-cache-v1';
+const CACHE_NAME = 'aether-scada-cache-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
