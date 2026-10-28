@@ -8,8 +8,10 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-dist
-dist-ssr
+# Allow tracking dist for zero-build cloud deployments
+!dist/**
+# Allow tracking dist for zero-build cloud deployments
+!dist/**-ssr
 *.local
 
 # Editor directories and files

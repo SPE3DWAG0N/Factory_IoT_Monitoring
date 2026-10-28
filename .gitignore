@@ -16,7 +16,8 @@ certs/
 .env.local
 
 # Build outputs
-dist/
+# Note: dashboard/dist is tracked for automated Firebase/VM deployments
+!dashboard/dist/**
 build/
 *.log
 .DS_Store
