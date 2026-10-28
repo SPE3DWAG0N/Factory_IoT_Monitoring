@@ -288,10 +288,14 @@ export class TelemetryEngine {
     sound.playAlarm();
   }
 
-  dismissSNSAlert() {
+  dismissAlert() {
     this.recentAlert = null;
     this.recentSNSAlert = null;
     this.notify();
+  }
+
+  dismissSNSAlert() {
+    this.dismissAlert();
   }
 
   // Resolution through Service Desk: marks fault ANCHORED and releases active device lock
