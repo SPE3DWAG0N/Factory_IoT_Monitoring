@@ -5,20 +5,23 @@
 #
 # Usage:
 #   1. Install Google Cloud CLI: https://cloud.google.com/sdk/docs/install
+#      (Or run in Google Cloud Shell directly in browser)
 #   2. Run: bash deploy_gcp.sh <YOUR_GCP_PROJECT_ID> [ALERT_EMAIL]
 #
 # What this script does (in order):
-#   [1] Enables all required GCP APIs
+#   [1] Enables all required GCP APIs (Pub/Sub, Firestore, Functions, Cloud Build, Eventarc, etc.)
 #   [2] Creates IAM Service Accounts with least-privilege roles
 #   [3] Creates Cloud Pub/Sub topics + subscriptions
 #   [4] Creates Cloud Storage bucket (replaces S3)
 #   [5] Creates Google Secret Manager secrets (replaces SSM Parameter Store)
 #   [6] Deploys Cloud Functions: fault-handler + store-readings (replaces Lambda)
-#   [7] Sets up Cloud Firestore database (replaces DynamoDB) — requires gcloud alpha
+#   [7] Sets up Cloud Firestore database (replaces DynamoDB) with TTL policy
 #   [8] Creates Compute Engine e2-micro instance (replaces EC2 t3.micro)
 #   [9] Outputs all resource names and dashboard URL
 # =============================================================================
 set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ── Arguments ─────────────────────────────────────────────────────────────────
 PROJECT_ID="${1:-}"
@@ -55,6 +58,8 @@ gcloud services enable \
   compute.googleapis.com \
   iam.googleapis.com \
   cloudbuild.googleapis.com \
+  artifactregistry.googleapis.com \
+  eventarc.googleapis.com \
   run.googleapis.com \
   --quiet
 echo "  ✓ APIs enabled"
@@ -70,7 +75,7 @@ gcloud iam service-accounts create plant-functions-sa \
 
 FUNCTIONS_SA="plant-functions-sa@${PROJECT_ID}.iam.gserviceaccount.com"
 
-# Grant Firestore write + Pub/Sub publish permissions
+# Grant Firestore write + Pub/Sub publish + Secret Manager access
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member="serviceAccount:$FUNCTIONS_SA" \
   --role="roles/datastore.user" --quiet
@@ -78,6 +83,10 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member="serviceAccount:$FUNCTIONS_SA" \
   --role="roles/pubsub.publisher" --quiet
+
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:$FUNCTIONS_SA" \
+  --role="roles/secretmanager.secretAccessor" --quiet
 
 # Compute SA
 gcloud iam service-accounts create plant-compute-sa \
@@ -111,14 +120,13 @@ gcloud pubsub topics create plant-telemetry \
 gcloud pubsub topics create plant-fault-alerts \
   --labels=project=plant-monitoring --quiet 2>/dev/null || echo "  [*] plant-fault-alerts topic exists"
 
-# Subscription for store-readings function (Rule 1 equivalent)
+# Explicit subscriptions (useful for monitoring, auditing, or custom subscribers)
 gcloud pubsub subscriptions create plant-telemetry-store-readings \
   --topic=plant-telemetry \
   --ack-deadline=30 \
   --message-retention-duration=7d \
   --quiet 2>/dev/null || echo "  [*] store-readings subscription exists"
 
-# Subscription for fault-handler function (Rule 2 equivalent)
 gcloud pubsub subscriptions create plant-telemetry-fault-check \
   --topic=plant-telemetry \
   --ack-deadline=30 \
@@ -137,9 +145,9 @@ gcloud storage buckets create "gs://${BUCKET_NAME}" \
   --uniform-bucket-level-access \
   --quiet 2>/dev/null || echo "  [*] Bucket gs://$BUCKET_NAME already exists"
 
-# Block public access (equivalent to BlockPublicAcls)
+# Enforce uniform bucket-level access & public access prevention
 gcloud storage buckets update "gs://${BUCKET_NAME}" \
-  --no-public-access-prevention 2>/dev/null || true
+  --public-access-prevention 2>/dev/null || true
 
 # Grant compute SA read/write on bucket
 gcloud storage buckets add-iam-policy-binding "gs://${BUCKET_NAME}" \
@@ -177,16 +185,17 @@ echo "  ✓ Secrets stored in Secret Manager"
 echo ""
 echo "=== [6/9] Deploying Cloud Functions (replaces AWS Lambda) ==="
 
-FUNCTIONS_DIR="$(dirname "$0")/functions"
+FUNCTIONS_DIR="$SCRIPT_DIR/functions"
 
 # Deploy fault-handler (Rule 2 equivalent: threshold check + Firestore + email)
+# Note: --trigger-topic is the plant-telemetry topic where IoT sensor data is published.
 gcloud functions deploy plant-fault-handler \
   --gen2 \
   --runtime=python312 \
   --region="$REGION" \
   --source="$FUNCTIONS_DIR" \
   --entry-point=fault_handler \
-  --trigger-topic=plant-telemetry-fault-check \
+  --trigger-topic=plant-telemetry \
   --service-account="$FUNCTIONS_SA" \
   --memory=256MB \
   --timeout=60s \
@@ -201,7 +210,7 @@ gcloud functions deploy plant-store-readings \
   --region="$REGION" \
   --source="$FUNCTIONS_DIR" \
   --entry-point=store_readings \
-  --trigger-topic=plant-telemetry-store-readings \
+  --trigger-topic=plant-telemetry \
   --service-account="$FUNCTIONS_SA" \
   --memory=256MB \
   --timeout=30s \
@@ -241,8 +250,6 @@ gcloud compute firewall-rules create plant-allow-web \
 if ! gcloud compute instances describe plant-scada-server \
      --zone="$ZONE" --quiet 2>/dev/null; then
 
-  STARTUP_SCRIPT="$(dirname "$0")/deploy_gcp.sh"
-
   gcloud compute instances create plant-scada-server \
     --zone="$ZONE" \
     --machine-type=e2-micro \
@@ -253,7 +260,7 @@ if ! gcloud compute instances describe plant-scada-server \
     --service-account="$COMPUTE_SA" \
     --scopes=cloud-platform \
     --tags=plant-scada-server \
-    --metadata-from-file startup-script="$(dirname "$0")/gcp/vm-startup.sh" \
+    --metadata-from-file startup-script="$SCRIPT_DIR/gcp/vm-startup.sh" \
     --quiet
   echo "  ✓ VM plant-scada-server created"
 else
@@ -265,10 +272,6 @@ echo ""
 VM_IP=$(gcloud compute instances describe plant-scada-server \
   --zone="$ZONE" \
   --format="get(networkInterfaces[0].accessConfigs[0].natIP)" 2>/dev/null || echo "<pending>")
-
-FAULT_HANDLER_URL=$(gcloud functions describe plant-fault-handler \
-  --region="$REGION" \
-  --format="get(serviceConfig.uri)" 2>/dev/null || echo "<pending>")
 
 echo "============================================================="
 echo "  ✅ AETHER-PLANT GCP DEPLOYMENT COMPLETE!"
@@ -288,10 +291,9 @@ echo "  └───────────────────────
 echo ""
 echo "  Pub/Sub Topic:   projects/$PROJECT_ID/topics/plant-telemetry"
 echo "  GCS Bucket:      gs://plant-reports-${PROJECT_ID}"
-echo "  Fault Function:  $FAULT_HANDLER_URL"
 echo "  VM IP:           $VM_IP"
 echo "  Dashboard URL:   http://$VM_IP/"
 echo ""
 echo "  Next step: deploy the React dashboard:"
-echo "    bash deploy_gcp_dashboard.sh $VM_IP [path/to/ssh-key]"
+echo "    bash deploy_gcp_dashboard.sh $VM_IP"
 echo "============================================================="

@@ -35,7 +35,6 @@ try:
     HAS_GCP_SDK = True
 except ImportError:
     HAS_GCP_SDK = False
-    print("[!] google-cloud-pubsub not installed. Run: pip install google-cloud-pubsub")
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "your-gcp-project-id")
@@ -60,14 +59,18 @@ running: bool        = True
 # ── Pub/Sub publisher (batching for efficiency) ────────────────────────────────
 publisher  = None
 topic_path = None
-if HAS_GCP_SDK:
-    batch_settings = pubsub_v1.types.BatchSettings(
-        max_messages=100,
-        max_bytes=1_000_000,
-        max_latency=0.01,
-    )
-    publisher  = pubsub_v1.PublisherClient(batch_settings=batch_settings)
-    topic_path = publisher.topic_path(GCP_PROJECT_ID, TOPIC_ID)
+if HAS_GCP_SDK and GCP_PROJECT_ID != "your-gcp-project-id":
+    try:
+        batch_settings = pubsub_v1.types.BatchSettings(
+            max_messages=100,
+            max_bytes=1_000_000,
+            max_latency=0.01,
+        )
+        publisher  = pubsub_v1.PublisherClient(batch_settings=batch_settings)
+        topic_path = publisher.topic_path(GCP_PROJECT_ID, TOPIC_ID)
+    except Exception as err:
+        print(f"[!] Pub/Sub initialization error: {err}. Falling back to dry-run mode.")
+        publisher = None
 
 
 def generate_reading(dev_config: dict) -> dict:
@@ -113,8 +116,9 @@ def publish_reading(payload: dict):
 
 def simulation_loop(interval_sec: int = 10):
     global running
-    print(f"[*] Starting GCP Pub/Sub telemetry stream (publishing every {interval_sec}s for 8 devices)")
-    print(f"[*] Topic: projects/{GCP_PROJECT_ID}/topics/{TOPIC_ID}")
+    mode_str = f"Live Pub/Sub -> projects/{GCP_PROJECT_ID}/topics/{TOPIC_ID}" if (HAS_GCP_SDK and publisher) else "Local Simulation (Dry-Run Mode)"
+    print(f"[*] Starting telemetry stream (publishing every {interval_sec}s for 8 devices)")
+    print(f"[*] Operational Mode: {mode_str}")
     print("[*] Available console commands: 'inject <device_id>', 'clear <device_id>', 'status', 'quit'")
 
     while running:
@@ -127,7 +131,7 @@ def simulation_loop(interval_sec: int = 10):
             if fut:
                 futures.append(fut)
 
-        # Wait for all publishes to confirm (optional — remove if fire-and-forget is preferred)
+        # Wait for all publishes to confirm
         for fut in futures:
             try:
                 fut.result(timeout=5)
@@ -172,11 +176,11 @@ def cli_listener():
 
 if __name__ == "__main__":
     if not HAS_GCP_SDK:
-        print("[-] Install dependencies: pip install google-cloud-pubsub")
-        sys.exit(1)
-
-    if GCP_PROJECT_ID == "your-gcp-project-id":
+        print("[!] google-cloud-pubsub not installed. Running in local dry-run simulation mode.")
+        print("[*] To publish to live GCP Pub/Sub: pip install google-cloud-pubsub")
+    elif GCP_PROJECT_ID == "your-gcp-project-id":
         print("[!] WARNING: Set GCP_PROJECT_ID environment variable before running in production.")
+        print("[*] Example: set GCP_PROJECT_ID=my-project-id  (Windows) or export GCP_PROJECT_ID=... (Linux/Mac)")
 
     t = threading.Thread(target=simulation_loop, args=(10,), daemon=True)
     t.start()

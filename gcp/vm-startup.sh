@@ -26,7 +26,10 @@ apt-get install -y nodejs
 
 # Pre-install serve globally so systemd unit runs without npx/network on start
 npm install -g serve --loglevel=error
-echo "  [✓] Node $(node -v) / npm $(npm -v) / serve installed"
+SERVE_BIN=$(which serve || command -v serve || echo "/usr/bin/serve")
+ln -sf "$SERVE_BIN" /usr/local/bin/serve 2>/dev/null || true
+ln -sf "$SERVE_BIN" /usr/bin/serve 2>/dev/null || true
+echo "  [✓] Node $(node -v) / npm $(npm -v) / serve ($SERVE_BIN) installed"
 
 # ── 3. App directory & ownership ────────────────────────────────────────────
 mkdir -p /opt/aether-plant/dist

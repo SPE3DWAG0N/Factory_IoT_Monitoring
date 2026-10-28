@@ -1,7 +1,3 @@
-imports:
-  - path: templates/pubsub.jinja
-  - path: templates/gcs.jinja
-  - path: templates/compute.jinja
 
 # ============================================================================
 #  AETHER-PLANT SCADA — Google Cloud Deployment Manager Configuration
@@ -176,6 +172,9 @@ resources:
               curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
               apt-get install -y nodejs
               npm install -g serve --loglevel=error
+              SERVE_BIN=$(which serve || command -v serve || echo '/usr/bin/serve')
+              ln -sf "$SERVE_BIN" /usr/local/bin/serve 2>/dev/null || true
+              ln -sf "$SERVE_BIN" /usr/bin/serve 2>/dev/null || true
 
               # ── 3. App directory & ownership ───────────────────────────────────
               mkdir -p /opt/aether-plant/dist
