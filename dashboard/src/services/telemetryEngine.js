@@ -144,10 +144,12 @@ export class TelemetryEngine {
   }
 
   setSpeed(speedMs) {
-    this.streamSpeed = speedMs;
+    this.streamSpeed = Number(speedMs);
     if (this.isRunning) {
-      this.startStream();
+      if (this.intervalId) clearInterval(this.intervalId);
+      this.intervalId = setInterval(() => this.tick(), this.streamSpeed);
     }
+    this.notify();
   }
 
   // Inject fault on a specific device (simulates CLI command: inject <device_id>)

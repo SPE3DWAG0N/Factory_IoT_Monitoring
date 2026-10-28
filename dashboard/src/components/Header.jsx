@@ -183,12 +183,15 @@ export default function Header({
 
             <select 
               value={streamSpeed} 
-              onChange={(e) => setStreamSpeed(Number(e.target.value))}
+              onChange={(e) => {
+                setStreamSpeed(Number(e.target.value));
+                sound.playClick();
+              }}
               className="font-mono"
               style={{
-                background: 'rgba(255,255,255,0.05)',
-                color: '#fff',
-                border: '1px solid rgba(255,255,255,0.1)',
+                background: '#0d1527',
+                color: '#38bdf8',
+                border: '1px solid rgba(56,189,248,0.3)',
                 borderRadius: '6px',
                 padding: '4px 8px',
                 fontSize: '0.72rem',
@@ -196,10 +199,10 @@ export default function Header({
                 outline: 'none'
               }}
             >
-              <option value={1000}>Speed: 1.0s (Fast)</option>
-              <option value={2500}>Speed: 2.5s (Demo)</option>
-              <option value={5000}>Speed: 5.0s (Plan)</option>
-              <option value={10000}>Speed: 10s (MQTT)</option>
+              <option value={1000} style={{ background: '#0d1527', color: '#f3f4f6' }}>Speed: 1.0s (Fast)</option>
+              <option value={2500} style={{ background: '#0d1527', color: '#f3f4f6' }}>Speed: 2.5s (Demo)</option>
+              <option value={5000} style={{ background: '#0d1527', color: '#f3f4f6' }}>Speed: 5.0s (Standard)</option>
+              <option value={10000} style={{ background: '#0d1527', color: '#f3f4f6' }}>Speed: 10s (Pub/Sub)</option>
             </select>
           </div>
 
