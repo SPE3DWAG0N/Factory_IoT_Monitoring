@@ -22,6 +22,14 @@ elif [ -s "/usr/local/nvm/nvm.sh" ]; then
   . "/usr/local/nvm/nvm.sh"
 fi
 
+# Ensure GCP Project ID is always configured
+GCP_PROJECT="${GCP_PROJECT_ID:-$(gcloud config get-value project 2>/dev/null || echo "")}"
+if [ -z "$GCP_PROJECT" ] || [ "$GCP_PROJECT" = "(unset)" ]; then
+  GCP_PROJECT="project-be0d8aa3-b99b-4b14-953"
+fi
+gcloud config set project "$GCP_PROJECT" --quiet 2>/dev/null || true
+export CLOUDSDK_CORE_PROJECT="$GCP_PROJECT"
+
 TARGET="${1:-plant-scada-server}"
 ARG2="${2:-}"
 VM_USER="ubuntu"
@@ -32,7 +40,7 @@ DASHBOARD_DIR="$SCRIPT_DIR/dashboard"
 echo ""
 echo "==================================================================="
 echo "  AETHER-PLANT SCADA — GCP Dashboard Deployment Pipeline"
-echo "  Target: $TARGET"
+echo "  Project: $GCP_PROJECT | Target: $TARGET"
 echo "==================================================================="
 echo ""
 
@@ -125,20 +133,20 @@ else
   INSTANCE="$TARGET"
 
   echo "[2/4] Preparing remote staging on Compute Engine VM ($INSTANCE in $ZONE)..."
-  gcloud compute ssh "$INSTANCE" --zone="$ZONE" \
+  gcloud compute ssh "$INSTANCE" --zone="$ZONE" --project="$GCP_PROJECT" \
     --command="mkdir -p ~/dashboard_staging && sudo mkdir -p $REMOTE_DIR" --quiet
   echo "  ✓ Staging ready"
   echo ""
 
   echo "[3/4] Uploading build artifacts via gcloud compute scp..."
-  gcloud compute scp --recurse "$DASHBOARD_DIR/dist" "$INSTANCE:~/dashboard_staging/" --zone="$ZONE" --quiet
-  gcloud compute ssh "$INSTANCE" --zone="$ZONE" \
+  gcloud compute scp --recurse "$DASHBOARD_DIR/dist" "$INSTANCE:~/dashboard_staging/" --zone="$ZONE" --project="$GCP_PROJECT" --quiet
+  gcloud compute ssh "$INSTANCE" --zone="$ZONE" --project="$GCP_PROJECT" \
     --command="sudo cp -r ~/dashboard_staging/dist/* $REMOTE_DIR/ && sudo chmod -R 755 /opt/aether-plant && rm -rf ~/dashboard_staging" --quiet
   echo "  ✓ Upload complete"
   echo ""
 
   echo "[4/4] Configuring & starting SCADA service on GCP VM..."
-  gcloud compute ssh "$INSTANCE" --zone="$ZONE" --command='
+  gcloud compute ssh "$INSTANCE" --zone="$ZONE" --project="$GCP_PROJECT" --command='
     sudo systemctl stop nginx 2>/dev/null || true
     sudo systemctl disable nginx 2>/dev/null || true
     sudo rm -f /usr/local/bin/serve
@@ -172,7 +180,7 @@ SVCEOF
     sudo systemctl status aether-scada --no-pager
   ' --quiet
 
-  VM_IP=$(gcloud compute instances describe "$INSTANCE" --zone="$ZONE" --format="get(networkInterfaces[0].accessConfigs[0].natIP)" 2>/dev/null || echo "<pending>")
+  VM_IP=$(gcloud compute instances describe "$INSTANCE" --zone="$ZONE" --project="$GCP_PROJECT" --format="get(networkInterfaces[0].accessConfigs[0].natIP)" 2>/dev/null || echo "<pending>")
 
   echo ""
   echo "==================================================================="
